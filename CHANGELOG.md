@@ -2,6 +2,25 @@
 
 ## v0.3.0
 
+### Added
+- **The client-model views.** `UserView`, `SessionView`, `ExperienceView`, `EnvironmentView` and
+  `TagView` join `Virtuademy.ScriptingApi`: what an authored world may see of a user, a session,
+  an experience, an environment and a tag. Five types, eighteen values.
+
+  The surface is not a judgement call — it is what the three shipped `Expose: CM*` nodes already
+  publish, read off their ports. The application's own `CMUser`, `CMSession`, `CMExperience`,
+  `CMEnvironment` and `CMTag` derive from these and keep the rest: preferences, participants,
+  permissions, ownership, the loaded thumbnail, the localisation sources.
+
+  Two decisions inside that surface are worth recording. `UserView` carries a flat
+  `ProfileImageUrl` rather than the preference object the node reads it through, because that
+  object also holds the user's nickname, bio, height, date of birth, city, social links and hand
+  preference — personal data, and the point of drawing this line is to decide such things on
+  purpose. And there is no `CatalogView`: the addressable catalogue steers the platform's own
+  content delivery, its only two uses are in the application, and an authored world has no
+  business naming it. The `Catalog` port left `Expose: CMEnvironment` with it — the one port this
+  split removes, so a graph that read it has to be re-authored.
+
 ### Changed
 - **The DTOs and the platform contracts left for `Virtuademy-SDK-Library`.** The assemblies
   `Virtuademy.SDK.ApiData.Wire` and `Virtuademy.SDK.Core` are retired: 48 wire types,
