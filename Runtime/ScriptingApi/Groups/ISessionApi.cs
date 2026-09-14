@@ -1,5 +1,7 @@
 ﻿using System;
 
+using System.Collections;
+
 namespace Virtuademy.ScriptingApi
 {
     /// <summary>
@@ -96,7 +98,7 @@ namespace Virtuademy.ScriptingApi
         /// script cannot await one: the whitelist denies <c>System.Threading</c>.
         /// </summary>
         /// <remarks>Node: <c>Reflectis: Get CMUser by ID</c>.</remarks>
-        WorldOperation GetUser(int userId, Action<UserView> onFound);
+        IEnumerator GetUser(int userId, Action<UserView> onFound);
 
         /// <summary>
         /// Looks an experience up by the addressable name of its environment. Hands null when the
@@ -104,7 +106,7 @@ namespace Virtuademy.ScriptingApi
         /// wants to send the player to exists at all.
         /// </summary>
         /// <remarks>Nodes: <c>Change Scene</c>, <c>Check Scene Availability</c>, <c>Reload Scene</c>.</remarks>
-        WorldOperation FindExperience(string addressableName, Action<ExperienceView> onFound);
+        IEnumerator FindExperience(string addressableName, Action<ExperienceView> onFound);
 
         /// <summary>
         /// Sends the local player into another experience. <paramref name="onJoined"/> receives
@@ -112,7 +114,7 @@ namespace Virtuademy.ScriptingApi
         /// by the time it runs, so there is rarely anything useful left to do in it.
         /// </summary>
         /// <remarks>Nodes: <c>Change Scene</c>, <c>Reload Scene</c>.</remarks>
-        WorldOperation JoinExperience(ExperienceView experience, bool multiplayer, Action<bool> onJoined = null);
+        IEnumerator JoinExperience(ExperienceView experience, bool multiplayer, Action<bool> onJoined = null);
 
         /// <summary>
         /// Someone else joined the session: their platform id and their session id.

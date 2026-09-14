@@ -1,5 +1,7 @@
 using System;
 
+using System.Collections;
+
 namespace Virtuademy.ScriptingApi
 {
     /// <summary>
@@ -34,6 +36,6 @@ namespace Virtuademy.ScriptingApi
         /// Nothing a world sends before this lands can be attributed to the run, so the node that
         /// raises this is the one the graph waits on. Node: <c>Analytic: Generate Experience ID</c>.
         /// </remarks>
-        WorldOperation GenerateExperienceGuid(string key, Action onReady = null);
+        IEnumerator GenerateExperienceGuid(string key, Action onReady = null);
     }
 }
