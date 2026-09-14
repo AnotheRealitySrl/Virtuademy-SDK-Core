@@ -34,6 +34,6 @@ namespace Virtuademy.ScriptingApi
         /// Nothing a world sends before this lands can be attributed to the run, so the node that
         /// raises this is the one the graph waits on. Node: <c>Analytic: Generate Experience ID</c>.
         /// </remarks>
-        void GenerateExperienceGuid(string key, Action onReady = null);
+        WorldOperation GenerateExperienceGuid(string key, Action onReady = null);
     }
 }
