@@ -2,6 +2,8 @@ using Virtuademy.SDK.Core.Utilities;
 
 using System.Threading.Tasks;
 
+using SPACS.Utilities;
+
 namespace Virtuademy.SDK.Core.Authentication
 {
     /// <summary>

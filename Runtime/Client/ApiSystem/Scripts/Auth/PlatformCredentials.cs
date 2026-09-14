@@ -2,6 +2,8 @@ using Virtuademy.SDK.Core.Utilities;
 
 using UnityEngine;
 
+using SPACS.Utilities;
+
 namespace Virtuademy.SDK.Core.ApiSystem
 {
     /// <summary>

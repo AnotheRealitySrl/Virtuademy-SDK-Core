@@ -1,5 +1,6 @@
 using System;
 
+
 namespace Virtuademy.ScriptingApi
 {
     [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]

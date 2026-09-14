@@ -1,5 +1,6 @@
+using SPACS.Utilities;
+
 #if UNITY_WEBGL && !UNITY_EDITOR
-using Virtuademy.SDK.Core.Utilities;
 
 using System;
 using System.Collections.Generic;
@@ -7,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 
 using UnityEngine;
+
 
 public class WebSocketMessagesHandler : Singleton<WebSocketMessagesHandler>
 {

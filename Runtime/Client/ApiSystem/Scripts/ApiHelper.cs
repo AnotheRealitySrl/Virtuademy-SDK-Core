@@ -16,6 +16,10 @@ using UnityEngine.Networking;
 
 using Virtuademy.SDK.Core.Authentication;
 
+using Virtuademy.SDK.Core;
+
+using SPACS.Utilities;
+
 namespace Virtuademy.SDK.Core.ApiSystem
 {
     /// <summary>

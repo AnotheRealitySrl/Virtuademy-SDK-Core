@@ -6,6 +6,8 @@ using Unity.Properties;
 
 using UnityEngine;
 
+using SPACS.Utilities;
+
 namespace Virtuademy.SDK.Core.ApiSystem
 {
     [Serializable, Newtonsoft.Json.JsonObject(Newtonsoft.Json.MemberSerialization.Fields)]

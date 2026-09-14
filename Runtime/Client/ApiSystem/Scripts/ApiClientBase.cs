@@ -11,6 +11,10 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 
+using Virtuademy.SDK.Core;
+
+using SPACS.Utilities;
+
 namespace Virtuademy.SDK.Core.ApiSystem
 {
     public class ApiClientBase
