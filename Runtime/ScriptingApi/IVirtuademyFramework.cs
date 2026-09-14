@@ -80,5 +80,8 @@ namespace Virtuademy.ScriptingApi
 
         /// <summary>The help panel, when the host provides one.</summary>
         IHelpApi Help { get; }
+
+        /// <summary>What this run reports about what the learner did.</summary>
+        IAnalyticsApi Analytics { get; }
     }
 }

@@ -1,4 +1,6 @@
-﻿namespace Virtuademy.ScriptingApi
+﻿using System;
+
+namespace Virtuademy.ScriptingApi
 {
     /// <summary>
     /// Facts about the session and the environment the world is running in, and the one thing a
@@ -68,5 +70,62 @@
         /// platform's own model represents as an absent preference rather than a blank.
         /// </summary>
         string LocalUserName { get; }
-    }
+    
+        /// <summary>
+        /// The local player as a whole, for the graph that exposes the user rather than reading
+        /// their name or id out of it.
+        /// </summary>
+        /// <remarks>Node: <c>Expose: CMUser</c>.</remarks>
+        UserView LocalUser { get; }
+
+        /// <summary>
+        /// The session as a whole, for the graph that exposes it rather than reading one value out
+        /// of it. The scalars above stay because that is what almost every node wants, and going
+        /// through a view to ask whether the session is multiplayer would be worse on both sides.
+        /// </summary>
+        /// <remarks>Node: <c>Expose: CMSession</c>.</remarks>
+        SessionView Details { get; }
+
+        /// <summary>The environment as a whole, for the same reason as <see cref="Details"/>.</summary>
+        /// <remarks>Node: <c>Expose: CMEnvironment</c>.</remarks>
+        EnvironmentView Environment { get; }
+
+        /// <summary>
+        /// Looks a user up by platform id and hands the result to <paramref name="onFound"/>, or
+        /// hands null when there is no such user. A callback rather than a returned task because a
+        /// script cannot await one: the whitelist denies <c>System.Threading</c>.
+        /// </summary>
+        /// <remarks>Node: <c>Reflectis: Get CMUser by ID</c>.</remarks>
+        void GetUser(int userId, Action<UserView> onFound);
+
+        /// <summary>
+        /// Looks an experience up by the addressable name of its environment. Hands null when the
+        /// platform has no experience for that name, which is how a world checks whether a scene it
+        /// wants to send the player to exists at all.
+        /// </summary>
+        /// <remarks>Nodes: <c>Change Scene</c>, <c>Check Scene Availability</c>, <c>Reload Scene</c>.</remarks>
+        void FindExperience(string addressableName, Action<ExperienceView> onFound);
+
+        /// <summary>
+        /// Sends the local player into another experience. <paramref name="onJoined"/> receives
+        /// whether the platform accepted; on success the current world is already being torn down
+        /// by the time it runs, so there is rarely anything useful left to do in it.
+        /// </summary>
+        /// <remarks>Nodes: <c>Change Scene</c>, <c>Reload Scene</c>.</remarks>
+        void JoinExperience(ExperienceView experience, bool multiplayer, Action<bool> onJoined = null);
+
+        /// <summary>
+        /// Someone else joined the session: their platform id and their session id.
+        /// </summary>
+        /// <remarks>
+        /// The platform's own <c>PlayerData</c> does not cross: the node that raises this has
+        /// exactly two ports, <c>UserId</c> and <c>SessionId</c>, and pulled both out of the payload
+        /// on its first line. Node: <c>Reflectis Networking: On Other Player Entered</c>.
+        /// </remarks>
+        event Action<int, string> OtherPlayerEntered;
+
+        /// <summary>Someone else left the session. Same two values as <see cref="OtherPlayerEntered"/>.</summary>
+        /// <remarks>Node: <c>Reflectis Networking: On Other Player Left</c>.</remarks>
+        event Action<int, string> OtherPlayerLeft;
+}
 }
