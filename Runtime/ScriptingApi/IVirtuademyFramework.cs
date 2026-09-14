@@ -3,16 +3,25 @@ using System;
 namespace Virtuademy.ScriptingApi
 {
     /// <summary>
-    /// What an authored world and an external app can both ask of the platform.
+    /// What only the platform knows, and a script could not work out for itself.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The half that does not depend on being a world.</b> Session facts, language, the local
-    /// player's saved values, which device this is, fading the view, the help panel — an external
-    /// app embedded in Virtuademy needs every one of these, and so does an authored environment.
-    /// What only an environment has — the avatar rig, the placeholders, the spawned objects, the
-    /// ownership of synced objects — lives on <c>IVirtuademyGameplay</c>, in the package a creator
-    /// installs and an external app does not.
+    /// <b>The line is server-held state, not audience.</b> Which session this is, what the local
+    /// player has saved, what this run reports about the learner — none of it exists anywhere but
+    /// the platform, so nothing else could answer. Everything the Virtuademy player merely
+    /// <i>provides</i> — the avatar, the world, the screen, the help panel, the language, the
+    /// device — is on <c>IVirtuademyGameplay</c>.
+    /// </para>
+    /// <para>
+    /// <b>This is not the surface an external application uses.</b> It was described that way at
+    /// first and the code never supported it: <see cref="Install"/> is internal and opened to one
+    /// assembly, the platform application's own, so nothing else can put an implementation behind
+    /// either interface. An external app reaches the platform through the HTTP and realtime
+    /// clients in <c>Virtuademy-SDK-Library</c>, where <c>Task</c> is unconstrained because the
+    /// whitelist binds creator code only. What this assembly genuinely shares with that path is
+    /// its <i>types</i> — the views and the analytic statements — which is why they live here and
+    /// why it declares no first-party reference.
     /// </para>
     /// <para>
     /// <b>The statics live here rather than on a separate locator class.</b> A Visual Scripting node
@@ -66,20 +75,8 @@ namespace Virtuademy.ScriptingApi
         /// <summary>Read-only facts about the session this is running in.</summary>
         ISessionApi Session { get; }
 
-        /// <summary>The active language and the strings authored against it.</summary>
-        ILocalizationApi Localization { get; }
-
         /// <summary>The local player's own saved values, and the leaderboards.</summary>
         ISaveDataApi SaveData { get; }
-
-        /// <summary>Which kind of device this is running on.</summary>
-        IPlatformApi Platform { get; }
-
-        /// <summary>Fading the view in and out.</summary>
-        IScreenApi Screen { get; }
-
-        /// <summary>The help panel, when the host provides one.</summary>
-        IHelpApi Help { get; }
 
         /// <summary>What this run reports about what the learner did.</summary>
         IAnalyticsApi Analytics { get; }
