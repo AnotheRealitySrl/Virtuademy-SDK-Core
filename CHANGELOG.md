@@ -3,6 +3,22 @@
 ## v0.3.0
 
 ### Changed
+- **The DTOs and the platform contracts left for `Virtuademy-SDK-Library`.** The assemblies
+  `Virtuademy.SDK.ApiData.Wire` and `Virtuademy.SDK.Core` are retired: 48 wire types,
+  `IPlatformContext`, `IPlatformAuthentication` and the five value types all belong to the HTTP
+  client's side of the line, and keeping them here meant a creator installed the platform's wire
+  format in order to author a world.
+
+### Added
+- **`Virtuademy.ScriptingApi`**, the assembly a creator's interpreted script may name. It opens
+  with the seventeen analytics types — `AnalyticDTO`, the three xAPI types, the six experience
+  records and the four enums — which had to stay reachable because the shipped Visual Scripting
+  nodes build xAPI statements out of them.
+
+  It declares no first-party reference, which is the condition for the server-side whitelist to
+  admit it, and it is where the platform contracts and the client-model base types are headed.
+
+### Changed
 - **Renamed.** The package id becomes `com.anotherealitysrl.virtuademy-sdk-core` and the assembly
   `Virtuademy.SDK.Core`; the wire assembly becomes `Virtuademy.SDK.ApiData.Wire`. The name
   `Virtuademy.SDK.Core` was in use by the framework package, which took `Virtuademy.SystemCore` in
