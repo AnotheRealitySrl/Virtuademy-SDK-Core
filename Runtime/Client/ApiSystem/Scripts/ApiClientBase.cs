@@ -79,6 +79,27 @@ namespace Virtuademy.SDK.Core.ApiSystem
         /// </remarks>
         public ITokenProvider Tokens { get; set; }
 
+        /// <summary>
+        /// Where this client asks for its provider, every time it needs one. Set this instead of
+        /// <see cref="Tokens"/> when the provider does not outlive the client.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A framework system is exactly that case, and both of its edges bite. It is re-created
+        /// across a scene load, so an instance captured once stops handing out tokens — silently,
+        /// permanently, and looking for all the world like an expired session. And it may not
+        /// exist yet when its owner initialises: the systems are registered together and
+        /// initialised in an order nothing here controls, so a client configured in one Init can
+        /// resolve nothing in another's.
+        /// </para>
+        /// <para>
+        /// This is what the <c>ScriptableObject</c> clients always did, one level down — they
+        /// resolved a provider inside the call rather than holding one. The delegate is how a host
+        /// that has a framework hands that behaviour to an assembly that does not know the word.
+        /// </para>
+        /// </remarks>
+        public Func<ITokenProvider> TokenSource { get; set; }
+
         public string ApiLabel { get; private set; }
 
         /// <summary>
@@ -353,10 +374,11 @@ namespace Virtuademy.SDK.Core.ApiSystem
             // Preferring the injected one now means that switch changes nothing about how this
             // method behaves.
             ITokenProvider tokenProvider = Tokens
+                ?? TokenSource?.Invoke()
                 ?? throw new InvalidOperationException(
-                    $"{Label}: no token provider. The owner sets Tokens before Init; "
-                    + "a ScriptableObject system does it from the framework, a plain host "
-                    + "passes one in.");
+                    $"{Label}: no token provider. The owner sets Tokens, or TokenSource when the "
+                    + "provider does not outlive this client — which is the case for a framework "
+                    + "system, re-created across a scene load.");
 
             if (JwtToken == null)
             {
