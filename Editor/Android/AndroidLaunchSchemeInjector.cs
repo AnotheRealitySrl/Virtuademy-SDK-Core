@@ -9,6 +9,7 @@ using UnityEditor.Android;
 
 using UnityEngine;
 
+using Virtuademy.SDK.Core.ApiSystem;
 using Virtuademy.SDK.TenantConfiguration.Editor;
 
 namespace Virtuademy.SDK.TenantConfiguration.Editor.Android

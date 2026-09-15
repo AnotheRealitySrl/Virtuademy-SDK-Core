@@ -3,9 +3,7 @@ using System.Text.RegularExpressions;
 
 using Newtonsoft.Json.Linq;
 
-using Virtuademy.SDK.Core.ApiSystem;
-
-namespace Virtuademy.SDK.TenantConfiguration.Editor
+namespace Virtuademy.SDK.Core.ApiSystem
 {
     /// <summary>
     /// The URI scheme the platform uses to launch this application, worked out from what the
@@ -23,10 +21,22 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// <para>
     /// <b>Derived from the app id, so there is nothing to agree on.</b> An external developer
     /// receives one file, the app config, and the tenant switch computes the scheme from the
-    /// credential in it — the same value the platform can compute for the same app. It can still be
-    /// overridden, because an app that already ships with a scheme cannot be asked to change the
-    /// one its users have installed, and because the platform will eventually carry the value
-    /// itself: when the app's configuration reports one, that wins outright.
+    /// credential in it. The platform computes the same value for the same app, from the
+    /// <c>appObjectId</c> its experiences already record — and it is the same GUID throughout: the
+    /// HMAC <c>AppId</c> header is what the identity handler reads, what it puts in the token's
+    /// <c>azp</c> claim, and what an <c>ExternalApp</c> experience is bound to. So neither side
+    /// has to be told the scheme; both can work it out.
+    /// </para>
+    /// <para>
+    /// <b>Runtime and not editor-only</b> for exactly that reason: the tenant switch computes it
+    /// to write a manifest, and the platform application computes it to launch. Two copies of one
+    /// derivation would be two things that can drift, and a drift here is silent — an intent that
+    /// resolves to nothing.
+    /// </para>
+    /// <para>
+    /// It can still be overridden, because an app that already ships with a scheme cannot be asked
+    /// to change the one its users have installed, and because the platform may come to carry the
+    /// value itself: when the app's configuration reports one, that wins outright.
     /// </para>
     /// </remarks>
     public static class LaunchScheme
@@ -84,6 +94,22 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             string firstBlock = appId.Value.ToString("D").Split('-')[0];
 
             return $"virtuademy-{firstBlock}".ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// What the platform opens to launch an application bound to <paramref name="appObjectId"/>,
+        /// when the experience records no launch address of its own.
+        /// </summary>
+        /// <remarks>
+        /// A prefix, not a whole address: the launcher appends its query to this, and the intent
+        /// filter matches on the scheme alone — so an application free to answer on any host and
+        /// path still answers here.
+        /// </remarks>
+        public static string UriFor(Guid? appObjectId)
+        {
+            string scheme = Derive(appObjectId);
+
+            return string.IsNullOrEmpty(scheme) ? null : $"{scheme}://";
         }
 
         /// <summary>Whether a scheme can be put in a manifest as it stands.</summary>
