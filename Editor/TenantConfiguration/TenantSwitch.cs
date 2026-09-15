@@ -1,6 +1,9 @@
 using Virtuademy.SDK.Core.ApiSystem;
 using Virtuademy.SDK.Http;
 
+using Newtonsoft.Json.Linq;
+
+using System;
 using System.Threading.Tasks;
 
 using UnityEditor;
@@ -48,6 +51,41 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
+        /// Settles the URI scheme the platform launches this application with, and records it.
+        /// </summary>
+        /// <remarks>
+        /// Part of reading the tenant rather than a step of its own, because both paths through the
+        /// switch come here — the one an application with its own configurator takes and the one
+        /// every other project takes — and a scheme that only half of them settled would be a
+        /// scheme that works in one project and silently does not in the next.
+        /// </remarks>
+        private static void ResolveLaunchScheme(AppConfigurationSettings settings, JObject appCustomConfig)
+        {
+            string scheme = LaunchScheme.For(settings.SelectedConfig,
+                                             appCustomConfig,
+                                             settings.LaunchSchemeOverride);
+
+            if (!LaunchScheme.IsValid(scheme))
+            {
+                Debug.LogWarning($"[TenantSwitch] No usable launch scheme for this app "
+                                 + $"({scheme ?? "none"}); the Android build will not claim one, so "
+                                 + "the platform cannot launch this application. A scheme is derived "
+                                 + "from the app id, so this normally means the app config carries "
+                                 + "no credential.");
+                return;
+            }
+
+            if (!string.Equals(settings.LaunchScheme, scheme, StringComparison.Ordinal))
+            {
+                Debug.Log($"[TenantSwitch] Launch scheme: {scheme}://. The Android build claims it "
+                          + "in the manifest; the experience that launches this application must "
+                          + "name the same one.");
+            }
+
+            settings.LaunchScheme = scheme;
+        }
+
+        /// <summary>
         /// Fetches the tenant and the app's custom configuration for the selected app, and records
         /// both on the settings asset.
         /// </summary>
@@ -80,6 +118,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             settings.CachedTenant = tenantData.Content;
             settings.CachedAppConfigJson = customConfig.IsSuccess ? customConfig.Content?.ToString() : null;
+
+            ResolveLaunchScheme(settings, customConfig.IsSuccess ? customConfig.Content : null);
+
             EditorUtility.SetDirty(settings);
 
             return tenantData.Content;

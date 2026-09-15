@@ -470,22 +470,12 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private AppConfigurationSettings FindOrCreateAppConfigurationSettings()
         {
-            string[] guids = AssetDatabase.FindAssets("t:" + typeof(AppConfigurationSettings).Name);
-            List<AppConfigurationSettings> allSettings = new();
-            foreach (string guid in guids)
+            AppConfigurationSettings existing = AppConfigurationSettings.FindSelected();
+
+            if (existing != null)
             {
-                var asset = AssetDatabase.LoadAssetAtPath<AppConfigurationSettings>(AssetDatabase.GUIDToAssetPath(guid));
-                if (asset != null)
-                    allSettings.Add(asset);
+                return existing;
             }
-
-            AppConfigurationSettings selected = allSettings.FirstOrDefault(x => x.IsSelected);
-            if (selected != null)
-                return selected;
-
-            AppConfigurationSettings fallback = allSettings.FirstOrDefault();
-            if (fallback != null)
-                return fallback;
 
             EnsureFolderExists(settings_folder_path);
             AppConfigurationSettings newSettings = CreateInstance<AppConfigurationSettings>();
