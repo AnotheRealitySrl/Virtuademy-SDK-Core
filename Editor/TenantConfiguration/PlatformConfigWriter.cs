@@ -46,9 +46,22 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// field is added to the DTO. Tracked as an open question in ADR 0025.
         /// </para>
         /// </summary>
-        private static string VersionFor(string apiType, TenantConfig config)
+        private static string VersionFor(string apiType, TenantConfig config, string configurationApiVersion)
         {
-            if (config == null || string.IsNullOrEmpty(apiType))
+            if (string.IsNullOrEmpty(apiType))
+            {
+                return null;
+            }
+
+            // Not one of the tenant's four: the Configuration API is the one an application is
+            // told about before it can ask the platform anything, so its version comes from the
+            // app config the developer was handed.
+            if (string.Equals(apiType, "Configuration", StringComparison.OrdinalIgnoreCase))
+            {
+                return configurationApiVersion;
+            }
+
+            if (config == null)
             {
                 return null;
             }
@@ -62,14 +75,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Records what the platform reported for this app, into the project's
-        /// <see cref="PlatformEndpoints"/> asset — found if it exists, created once if it does not.
-        /// </summary>
-        /// <param name="tenant">Source of the API versions, until the endpoint DTO carries them.</param>
-        /// <param name="apiEndpoints">The <c>api-endpoints</c> response. Its <c>BaseUrls</c> are already ordered by the server, so the first is taken.</param>
-        /// <param name="generatedFrom">App and environment, recorded in the asset so a diff says where the values came from.</param>
-        /// <returns>The asset, or null when nothing was written — in which case any existing content is left untouched.</returns>
-        /// <summary>
         /// Fetches the endpoint table for the selected app and writes both generated assets.
         /// </summary>
         /// <remarks>
@@ -79,8 +84,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// project holding one without the other reaches an endpoint it cannot authenticate to.
         /// </para>
         /// <para>
-        /// A failed endpoint fetch is a warning rather than a failure: the writer leaves whatever
-        /// the asset already held, so one bad request cannot point a build at nothing.
+        /// A failed endpoint fetch is a warning rather than a failure: every type it would have
+        /// reported keeps whatever the asset already held, so one bad request cannot point a build
+        /// at nothing. The <c>Configuration</c> entry is written regardless, because it comes from
+        /// the app config rather than from the fetch — which is what lets a project work on an
+        /// environment that does not serve discovery at all.
         /// </para>
         /// </remarks>
         public static async Task WriteFor(AppConfigurationSettings settings, Tenant tenant)
@@ -90,36 +98,70 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             ApiResponse<List<ApiEndpoint>> endpoints =
                 await TenantConfigurationClient.GetApiEndpoints(appConfig);
 
-            if (endpoints.IsSuccess)
-            {
-                WriteEndpoints(tenant, endpoints.Content,
-                               $"{settings.SelectedApp} / {settings.SelectedEnv}");
-            }
-            else
+            if (!endpoints.IsSuccess)
             {
                 Debug.LogWarning($"[PlatformConfigWriter] Could not fetch API endpoints " +
-                                 $"({endpoints.StatusCode} {endpoints.ReasonPhrase}); " +
-                                 "the generated endpoint asset keeps its previous content.");
+                                 $"({endpoints.StatusCode} {endpoints.ReasonPhrase}); the types it " +
+                                 "would have reported keep whatever the asset already held. A 401 " +
+                                 "here usually means the environment does not serve " +
+                                 "manage/apps/api-endpoints yet — the request falls through to the " +
+                                 "id route, which rejects it before it can fail to bind. The " +
+                                 "Configuration entry is written either way, so the project can " +
+                                 "still reach the platform and read its tenant.");
             }
+
+            WriteEndpoints(tenant,
+                           endpoints.IsSuccess ? endpoints.Content : null,
+                           $"{settings.SelectedApp} / {settings.SelectedEnv}",
+                           appConfig);
 
             WriteCredentials(appConfig?.Credential);
         }
 
+        /// <summary>
+        /// Records what the platform reported for this app, into the project's
+        /// <see cref="PlatformEndpoints"/> asset — found if it exists, created once if it does not.
+        /// </summary>
+        /// <param name="tenant">Source of the API versions, until the endpoint DTO carries them.</param>
+        /// <param name="apiEndpoints">The <c>api-endpoints</c> response, or null when the fetch failed. Its <c>BaseUrls</c> are already ordered by the server, so the first is taken.</param>
+        /// <param name="generatedFrom">App and environment, recorded in the asset so a diff says where the values came from.</param>
+        /// <param name="appConfig">
+        /// The app config this switch was driven from. It supplies the <c>Configuration</c> entry,
+        /// which discovery structurally cannot: asking the platform where the Configuration API
+        /// lives requires already knowing. A project holding only that one entry still works — it
+        /// reads its tenant, and the tenant carries the other four addresses.
+        /// </param>
+        /// <returns>The asset, or null when nothing was written — in which case any existing content is left untouched.</returns>
         public static PlatformEndpoints WriteEndpoints(Tenant tenant,
                                                        IReadOnlyList<ApiEndpoint> apiEndpoints,
-                                                       string generatedFrom)
+                                                       string generatedFrom,
+                                                       AppIdentification appConfig = null)
         {
-            if (apiEndpoints == null || apiEndpoints.Count == 0)
+            List<PlatformEndpoint> entries = (apiEndpoints ?? Array.Empty<ApiEndpoint>())
+                .Where(e => e != null && !string.IsNullOrEmpty(e.Type) && e.BaseUrls != null && e.BaseUrls.Count > 0)
+                .Select(e => new PlatformEndpoint(e.Type, e.BaseUrls[0],
+                                                  VersionFor(e.Type, tenant?.Config, appConfig?.ApiVersion)))
+                .ToList();
+
+            // The address the switch itself just talked to, recorded because nothing else can
+            // record it. Discovery is the authority for every other type; for this one it is
+            // circular, and on an environment that does not serve discovery at all this is the
+            // only entry there is.
+            if (!string.IsNullOrEmpty(appConfig?.ApiBaseUrl)
+                && !entries.Any(e => string.Equals(e.ApiType, "Configuration", StringComparison.OrdinalIgnoreCase)))
             {
-                Debug.LogWarning("[PlatformConfigWriter] No API endpoints to write — the fetch returned none. " +
-                                 "Leaving the existing asset as it was: a failed request must not point a build at nothing.");
-                return null;
+                entries.Insert(0, new PlatformEndpoint("Configuration",
+                                                       appConfig.ApiBaseUrl,
+                                                       appConfig.ApiVersion));
             }
 
-            List<PlatformEndpoint> entries = apiEndpoints
-                .Where(e => e != null && !string.IsNullOrEmpty(e.Type) && e.BaseUrls != null && e.BaseUrls.Count > 0)
-                .Select(e => new PlatformEndpoint(e.Type, e.BaseUrls[0], VersionFor(e.Type, tenant?.Config)))
-                .ToList();
+            if (entries.Count == 0)
+            {
+                Debug.LogWarning("[PlatformConfigWriter] No API endpoints to write — the fetch returned none " +
+                                 "and the app config carries no base URL. Leaving the existing asset as it was: " +
+                                 "a failed request must not point a build at nothing.");
+                return null;
+            }
 
             // A type that appears twice makes the table ambiguous for every consumer, because
             // resolution is keyed on type alone (ADR 0024) and both TryGet here and
@@ -139,6 +181,20 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             }
 
             PlatformEndpoints asset = FindOrCreate<PlatformEndpoints>(nameof(PlatformEndpoints) + ".asset");
+
+            // What is written never holds fewer types than what was there. The asset is one whole
+            // list, so writing only what this run learned would turn a partial answer — a failed
+            // discovery that still knows the Configuration address — into a build that had lost
+            // four addresses it used to have. A type this run did report replaces the old one.
+            foreach (PlatformEndpoint kept in asset.Endpoints)
+            {
+                if (kept != null
+                    && !string.IsNullOrEmpty(kept.ApiType)
+                    && !entries.Any(e => string.Equals(e.ApiType, kept.ApiType, StringComparison.OrdinalIgnoreCase)))
+                {
+                    entries.Add(kept);
+                }
+            }
 
             if (!asset.Write(generatedFrom, entries))
             {
