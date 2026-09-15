@@ -26,9 +26,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         [SerializeField] private Tenant cachedTenant;
         [SerializeField] private string cachedAppConfigJson;
 
-        [SerializeField] private string launchScheme;
-        [SerializeField] private string launchSchemeOverride;
-
         public bool IsSelected { get => isSelected; set => isSelected = value; }
 
         public List<TextAsset> AppAssets => appAssets;
@@ -57,23 +54,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             get => selectedConfig;
             set { selectedConfig = value; EditorUtility.SetDirty(this); }
         }
-
-        /// <summary>
-        /// The URI scheme the platform launches this application with, worked out at the last
-        /// tenant switch. Read by the Android build step, which claims it in the manifest.
-        /// </summary>
-        /// <remarks>
-        /// Recorded rather than recomputed at build time because the build must not depend on
-        /// reaching the platform: a scheme the switch settled is a fact on disk, and a build that
-        /// resolved its own would fail differently depending on the network.
-        /// </remarks>
-        [CreateProperty] public string LaunchScheme { get => launchScheme; set => launchScheme = value; }
-
-        /// <summary>
-        /// A scheme this project pins, for an application that already ships with one. Empty means
-        /// the switch derives it. The platform still wins over both, when it reports one.
-        /// </summary>
-        [CreateProperty] public string LaunchSchemeOverride { get => launchSchemeOverride; set => launchSchemeOverride = value; }
 
         [CreateProperty] public Tenant CachedTenant { get => cachedTenant; set => cachedTenant = value; }
         [CreateProperty] public string CachedAppConfigJson { get => cachedAppConfigJson; set => cachedAppConfigJson = value; }

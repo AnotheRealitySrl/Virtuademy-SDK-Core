@@ -47,7 +47,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor.Android
         public void OnPostGenerateGradleAndroidProject(string path)
         {
             AppConfigurationSettings settings = AppConfigurationSettings.FindSelected();
-            string scheme = settings?.LaunchScheme;
+            string scheme = LaunchScheme.Derive(settings?.SelectedConfig?.Credential?.AppId);
 
             if (!LaunchScheme.IsValid(scheme))
             {

@@ -1,9 +1,6 @@
 using Virtuademy.SDK.Core.ApiSystem;
 using Virtuademy.SDK.Http;
 
-using Newtonsoft.Json.Linq;
-
-using System;
 using System.Threading.Tasks;
 
 using UnityEditor;
@@ -51,38 +48,29 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Settles the URI scheme the platform launches this application with, and records it.
+        /// Says which URI scheme the platform will launch this application with.
         /// </summary>
         /// <remarks>
-        /// Part of reading the tenant rather than a step of its own, because both paths through the
-        /// switch come here — the one an application with its own configurator takes and the one
-        /// every other project takes — and a scheme that only half of them settled would be a
-        /// scheme that works in one project and silently does not in the next.
+        /// Reported, not recorded: it is a function of the credential in the app config, so the
+        /// Android build works it out for itself and there is no copy to go stale. Said out loud
+        /// here because the switch is the moment a developer is looking, and because a manifest
+        /// written by hand — for a project that does not use the build step — needs the value.
         /// </remarks>
-        private static void ResolveLaunchScheme(AppConfigurationSettings settings, JObject appCustomConfig)
+        private static void ReportLaunchScheme(AppConfigurationSettings settings)
         {
-            string scheme = LaunchScheme.For(settings.SelectedConfig,
-                                             appCustomConfig,
-                                             settings.LaunchSchemeOverride);
+            string scheme = LaunchScheme.Derive(settings.SelectedConfig?.Credential?.AppId);
 
             if (!LaunchScheme.IsValid(scheme))
             {
-                Debug.LogWarning($"[TenantSwitch] No usable launch scheme for this app "
-                                 + $"({scheme ?? "none"}); the Android build will not claim one, so "
-                                 + "the platform cannot launch this application. A scheme is derived "
-                                 + "from the app id, so this normally means the app config carries "
-                                 + "no credential.");
+                Debug.LogWarning("[TenantSwitch] No launch scheme for this app: the app config "
+                                 + "carries no credential to derive one from, so the Android build "
+                                 + "will claim none and the platform cannot launch this application.");
                 return;
             }
 
-            if (!string.Equals(settings.LaunchScheme, scheme, StringComparison.Ordinal))
-            {
-                Debug.Log($"[TenantSwitch] Launch scheme: {scheme}://. The Android build claims it "
-                          + "in the manifest; the experience that launches this application must "
-                          + "name the same one.");
-            }
-
-            settings.LaunchScheme = scheme;
+            Debug.Log($"[TenantSwitch] Launch scheme: {scheme}://. The Android build claims it in "
+                      + "the manifest, and the platform derives the same value from the app id the "
+                      + "experience is bound to.");
         }
 
         /// <summary>
@@ -119,7 +107,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             settings.CachedTenant = tenantData.Content;
             settings.CachedAppConfigJson = customConfig.IsSuccess ? customConfig.Content?.ToString() : null;
 
-            ResolveLaunchScheme(settings, customConfig.IsSuccess ? customConfig.Content : null);
+            ReportLaunchScheme(settings);
 
             EditorUtility.SetDirty(settings);
 
