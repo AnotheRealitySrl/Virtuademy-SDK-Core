@@ -147,12 +147,34 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             // record it. Discovery is the authority for every other type; for this one it is
             // circular, and on an environment that does not serve discovery at all this is the
             // only entry there is.
-            if (!string.IsNullOrEmpty(appConfig?.ApiBaseUrl)
-                && !entries.Any(e => string.Equals(e.ApiType, "Configuration", StringComparison.OrdinalIgnoreCase)))
+            //
+            // Two cases where it must also override what discovery said. A loopback address can
+            // only have been set by someone deliberately aiming this project at a service on
+            // their own machine — the same rule ApiClientBase applies at runtime — and the
+            // registry answers with the deployed hostname first, so without this a switch driven
+            // from localhost would record the deployed address and silently undo itself on the
+            // next run. And an entry with no version is worse than the app config's, which is
+            // the version the switch has just been using successfully.
+            if (!string.IsNullOrEmpty(appConfig?.ApiBaseUrl))
             {
-                entries.Insert(0, new PlatformEndpoint("Configuration",
-                                                       appConfig.ApiBaseUrl,
-                                                       appConfig.ApiVersion));
+                PlatformEndpoint reported = entries.FirstOrDefault(
+                    e => string.Equals(e.ApiType, "Configuration", StringComparison.OrdinalIgnoreCase));
+
+                if (reported == null || IsLoopback(appConfig.ApiBaseUrl))
+                {
+                    if (reported != null)
+                    {
+                        Debug.Log($"[PlatformConfigWriter] Keeping the Configuration address this " +
+                                  $"switch was driven from ({appConfig.ApiBaseUrl}) over the one the " +
+                                  $"platform reported ({reported.BaseUrl}): a loopback address is a " +
+                                  "deliberate local override.");
+                        entries.Remove(reported);
+                    }
+
+                    entries.Insert(0, new PlatformEndpoint("Configuration",
+                                                           appConfig.ApiBaseUrl,
+                                                           appConfig.ApiVersion));
+                }
             }
 
             if (entries.Count == 0)
@@ -212,6 +234,14 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             return asset;
         }
+
+        /// <summary>
+        /// Whether a base URL points at this machine. Same test <c>ApiClientBase</c> makes at
+        /// runtime, so the write side and the read side cannot disagree about what counts as a
+        /// local override.
+        /// </summary>
+        private static bool IsLoopback(string url)
+            => Uri.TryCreate(url, UriKind.Absolute, out Uri parsed) && parsed.IsLoopback;
 
         /// <summary>
         /// Records the HMAC credential into the project's <see cref="PlatformCredentials"/> asset —
