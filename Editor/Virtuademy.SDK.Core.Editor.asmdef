@@ -1,0 +1,21 @@
+{
+    "name": "Virtuademy.SDK.Core.Editor",
+    "rootNamespace": "Virtuademy.SDK.TenantConfiguration.Editor",
+    "references": [
+        "Virtuademy.SDK.Core.Client",
+        "Virtuademy.SDK.TenantConfiguration",
+        "Virtuademy.SDK.TenantConfiguration.Wire",
+        "SPACS.Utility"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

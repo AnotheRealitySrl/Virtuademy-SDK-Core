@@ -1,0 +1,17 @@
+<engine:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:engine="UnityEngine.UIElements" xmlns:editor="UnityEditor.UIElements" noNamespaceSchemaLocation="../../../../UIElementsSchema/UIElements.xsd" editor-extension-mode="False">
+    <Style src="project://database/Packages/com.anotherealitysrl.virtuademy-sdk-tenantconfiguration/Editor/Scripts/AppConfigurationWindow/AppConfigurationWindow.uss?fileID=7433441132597879392&amp;guid=2a55abfc0a2036642adffac3b7ce5b8f&amp;type=3#AppConfigurationWindow" />
+    <engine:VisualElement name="AppName" style="font-size: 18px;">
+        <engine:Label text="AppName" name="Header" class="section-header" style="font-size: 20px; -unity-font-style: bold;" />
+    </engine:VisualElement>
+    <engine:VisualElement name="Separator" class="separator" />
+    <engine:VisualElement name="AppPropertiesContainer">
+        <engine:Label text="App configuration" name="Header" class="section-header" />
+        <engine:VisualElement name="AppPropertiesContainerTyped" style="flex-grow: 1;" />
+        <engine:VisualElement name="AppPropertiesContainerRaw">
+            <engine:TextField placeholder-text="Raw config" multiline="true" />
+        </engine:VisualElement>
+        <engine:Toggle label="Edit raw data" name="EditModeToggle" />
+    </engine:VisualElement>
+    <engine:VisualElement name="Separator" class="separator" />
+    <engine:Button text="Update app configuration" name="UpdateAppConfigurationButton" />
+</engine:UXML>

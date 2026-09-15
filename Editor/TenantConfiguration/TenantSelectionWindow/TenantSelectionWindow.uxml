@@ -1,0 +1,46 @@
+<engine:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:engine="UnityEngine.UIElements" xmlns:editor="UnityEditor.UIElements" noNamespaceSchemaLocation="../../../../UIElementsSchema/UIElements.xsd" editor-extension-mode="False">
+    <Style src="project://database/Packages/com.anotherealitysrl.virtuademy-sdk-tenantconfiguration/Editor/Scripts/TenantSelectionWindow/TenantSelectionWindow.uss?fileID=7433441132597879392&amp;guid=fa7bf02bcbe45f048842628c0255d6ac&amp;type=3#TenantSelectionWindow" />
+    <engine:VisualElement style="flex-grow: 1; margin-top: 10px; margin-right: 10px; margin-bottom: 10px; margin-left: 10px;">
+        <engine:VisualElement name="AppConfigurationSettingsSection" style="flex-shrink: 0; margin-bottom: 6px;">
+            <engine:Label text="Configuration source" style="-unity-font-style: bold; margin-bottom: 2px;" />
+            <editor:ObjectField name="AppConfigurationSettingsField" label="App Configuration Settings" allow-scene-objects="false" />
+        </engine:VisualElement>
+        <engine:VisualElement name="Separator" class="separator" />
+        <engine:VisualElement name="SelectedAppConfig" style="flex-shrink: 0;">
+            <engine:Label text="Selected tenant configuration" name="Header" class="section-header" />
+            <engine:VisualElement name="AppId" class="appconfig-item">
+                <engine:Label text="App Id:" name="Key" />
+                <engine:Label text="Label" name="Value" class="appconfig-item-value" />
+            </engine:VisualElement>
+            <engine:VisualElement name="AppSecret" class="appconfig-item">
+                <engine:Label text="App secret:" name="Key" />
+                <engine:Label text="Label" name="Value" class="appconfig-item-value" />
+            </engine:VisualElement>
+            <engine:VisualElement name="ApiBaseUrl" class="appconfig-item">
+                <engine:Label text="Tenant configuration base url: " name="Key" />
+                <engine:Label text="Label" name="Value" class="appconfig-item-value" />
+            </engine:VisualElement>
+            <engine:VisualElement name="ApiVersion" class="appconfig-item">
+                <engine:Label text="Tenant configuration version:" name="Key" />
+                <engine:Label text="Label" name="Value" class="appconfig-item-value" />
+            </engine:VisualElement>
+        </engine:VisualElement>
+        <engine:VisualElement name="Separator" class="separator" />
+        <engine:ScrollView style="flex-direction: row; margin-top: 5px; margin-bottom: 5px;">
+            <engine:Label text="Available apps" name="Header" class="section-header" />
+        </engine:ScrollView>
+        <engine:Label text="" name="TenantMismatchLabel" style="display: none; -unity-text-align: upper-center; color: rgb(230, 170, 50); margin-top: 4px; margin-bottom: 4px; white-space: normal;" />
+        <engine:VisualElement name="Separator" class="separator" />
+        <engine:VisualElement name="LoginSection" style="flex-direction: row; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 5px; margin-bottom: 5px;">
+            <engine:Button text="Login" name="LoginButton" />
+            <engine:Button text="Logout" name="LogoutButton" />
+            <engine:Label text="Not logged in" name="LoginStatusLabel" style="margin-left: 10px;" />
+        </engine:VisualElement>
+        <engine:VisualElement name="Separator" class="separator" />
+        <engine:VisualElement name="ButtonsContainer" style="flex-direction: row; align-items: center; justify-content: center; flex-shrink: 0;">
+            <engine:Button text="Configure App" name="ChangeConfigButton" style="display: none;" />
+            <engine:Button text="Build with selected config" name="BuildButton" />
+            <engine:Button text="App configuration" name="ConfigureAppButton" style="display: none;" />
+        </engine:VisualElement>
+    </engine:VisualElement>
+</engine:UXML>

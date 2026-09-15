@@ -1,0 +1,20 @@
+fileFormatVersion: 2
+guid: 803919840c7d2fe4b8122e2068f40525
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - m_ViewDataDictionary: {instanceID: 0}
+  - m_VisualTreeAsset: {fileID: 9197481963319205126, guid: 44888c9a765055a4991ab6fc42b98287,
+      type: 3}
+  - configurationItemTextField: {fileID: 9197481963319205126, guid: 61805ae6ef759784ca305ae6d305b1a0,
+      type: 3}
+  - configurationItemNumericField: {fileID: 9197481963319205126, guid: f3fccd0d3ab15c54c9caad32e7b0072f,
+      type: 3}
+  - configurationItemCheckBox: {fileID: 9197481963319205126, guid: 2923b6d588d93c940a209d413692a427,
+      type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
