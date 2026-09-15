@@ -127,7 +127,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             changeConfigButton = buttonsContainer.Q<Button>("ChangeConfigButton");
             changeConfigButton.clicked += async () =>
             {
-                await appConfigurationSettings.ConfigurationScript.ConfigureApp(appConfigurationSettings);
+                // An application with its own configurator does more than switch tenant — it reads
+                // a product name, a theme, a set of localized assets out of the app's custom
+                // config — and that configurator writes the generated assets on its way through.
+                // A project without one still needs them written, which is what TenantSwitch is.
+                if (appConfigurationSettings.ConfigurationScript != null)
+                {
+                    await appConfigurationSettings.ConfigurationScript.ConfigureApp(appConfigurationSettings);
+                }
+                else
+                {
+                    await TenantSwitch.Apply(appConfigurationSettings);
+                }
             };
 
             buildButton = buttonsContainer.Q<Button>("BuildButton");
@@ -275,8 +286,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         {
             if (changeConfigButton != null)
             {
-                bool showConfigure = appConfigurationSettings.ConfigurationScript != null;
-                changeConfigButton.style.display = showConfigure ? DisplayStyle.Flex : DisplayStyle.None;
+                // Shown unconditionally: with a configurator the button runs it, without one it
+                // applies the tenant, and there is no project for which applying a tenant is
+                // meaningless. Hiding it when no configurator existed is what left an external
+                // application able to pick a tenant and unable to apply it.
+                changeConfigButton.style.display = DisplayStyle.Flex;
             }
 
             if (buildButton != null)

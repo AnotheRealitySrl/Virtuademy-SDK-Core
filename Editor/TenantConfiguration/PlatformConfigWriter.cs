@@ -1,9 +1,11 @@
 using Virtuademy.SDK.Core.ApiSystem;
+using Virtuademy.SDK.Http;
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 using UnityEditor;
 
@@ -67,6 +69,42 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <param name="apiEndpoints">The <c>api-endpoints</c> response. Its <c>BaseUrls</c> are already ordered by the server, so the first is taken.</param>
         /// <param name="generatedFrom">App and environment, recorded in the asset so a diff says where the values came from.</param>
         /// <returns>The asset, or null when nothing was written — in which case any existing content is left untouched.</returns>
+        /// <summary>
+        /// Fetches the endpoint table for the selected app and writes both generated assets.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The pair is written together because they are one answer to one question — which
+        /// platform this project talks to, and what it signs its pre-login calls with — and a
+        /// project holding one without the other reaches an endpoint it cannot authenticate to.
+        /// </para>
+        /// <para>
+        /// A failed endpoint fetch is a warning rather than a failure: the writer leaves whatever
+        /// the asset already held, so one bad request cannot point a build at nothing.
+        /// </para>
+        /// </remarks>
+        public static async Task WriteFor(AppConfigurationSettings settings, Tenant tenant)
+        {
+            AppIdentification appConfig = settings.SelectedConfig;
+
+            ApiResponse<List<ApiEndpoint>> endpoints =
+                await TenantConfigurationClient.GetApiEndpoints(appConfig);
+
+            if (endpoints.IsSuccess)
+            {
+                WriteEndpoints(tenant, endpoints.Content,
+                               $"{settings.SelectedApp} / {settings.SelectedEnv}");
+            }
+            else
+            {
+                Debug.LogWarning($"[PlatformConfigWriter] Could not fetch API endpoints " +
+                                 $"({endpoints.StatusCode} {endpoints.ReasonPhrase}); " +
+                                 "the generated endpoint asset keeps its previous content.");
+            }
+
+            WriteCredentials(appConfig?.Credential);
+        }
+
         public static PlatformEndpoints WriteEndpoints(Tenant tenant,
                                                        IReadOnlyList<ApiEndpoint> apiEndpoints,
                                                        string generatedFrom)
