@@ -45,9 +45,15 @@ namespace Virtuademy.SDK.Core.ApiSystem
         private static readonly Regex valid = new("^[a-z][a-z0-9.+-]*$", RegexOptions.Compiled);
 
         /// <summary>
-        /// <c>virtuademy-</c> plus the first block of the app id: unique per registered app,
-        /// stable for that app, and short enough to read back over a call.
+        /// <c>v</c> plus the app id, whole: <c>v</c> and then the GUID as anyone writes it.
         /// </summary>
+        /// <remarks>
+        /// The whole id rather than a piece of it, so the scheme cannot collide between two
+        /// registered applications and so a reader can check it against the app id by eye. The
+        /// dashes are legal — a URI scheme admits letters, digits, <c>+</c>, <c>-</c> and <c>.</c>
+        /// after the first letter — and the leading <c>v</c> is there because a scheme may not
+        /// start with a digit, which a GUID often does.
+        /// </remarks>
         /// <returns>The scheme, or null when there is no app id to derive one from.</returns>
         public static string Derive(Guid? appId)
         {
@@ -56,9 +62,7 @@ namespace Virtuademy.SDK.Core.ApiSystem
                 return null;
             }
 
-            string firstBlock = appId.Value.ToString("D").Split('-')[0];
-
-            return $"virtuademy-{firstBlock}".ToLowerInvariant();
+            return $"v{appId.Value:D}".ToLowerInvariant();
         }
 
         /// <summary>
