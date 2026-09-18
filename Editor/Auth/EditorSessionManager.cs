@@ -35,6 +35,12 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private static readonly object renewalLock = new();
         private static Task<bool> renewalInFlight;
 
+        // Suffix appended to the tenant label to form the Application API token label
+        // (tenant "Simbi" -> "SimbiApplication"). Same convention as
+        // AuthenticationBridge.ManageTokens in the WebGL bridge — the match rule is
+        // in FetchTenantTokenAsync.
+        private const string applicationApiLabelSuffix = "Application";
+
         /// <summary>
         /// Guarantees a usable token, renewing it if needed. Renewal is silent whenever the MSAL
         /// cache still holds a refresh token; otherwise it falls back to an interactive login when
@@ -272,9 +278,27 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 return null;
             }
 
-            JwtToken matchingToken = tokens?.FirstOrDefault(t => t.ApiLabel == tenant.Label);
+            tokens ??= Array.Empty<JwtToken>();
+
+            // Tenants provisioned under the current convention label the Application API
+            // "<TenantLabel>Application", mirroring the AI/Realtime scheme ("SimbiAI",
+            // "SimbiRealtime"). Match the suffixed label first, then fall back to the bare tenant
+            // label for tenants provisioned before it (e.g. Marangoni).
+            // TODO: drop the legacy bare-label fallback once every tenant carries the suffix.
+            string apiLabel = tenant.Label + applicationApiLabelSuffix;
+            JwtToken matchingToken = tokens.FirstOrDefault(t => t.ApiLabel == apiLabel)
+                                     ?? tokens.FirstOrDefault(t => t.ApiLabel == tenant.Label);
             if (matchingToken == null)
-                Debug.LogError($"[EditorSessionManager] No token found for API label: {tenant.Label}");
+            {
+                // Listing what came back separates "no token was minted at all" — an empty list
+                // means the profile is not Enabled, or the app's role definition does not request
+                // the API — from "minted under a label we do not match".
+                string received = tokens.Length == 0
+                                  ? "<none>"
+                                  : string.Join(", ", tokens.Select(t => t.ApiLabel));
+                Debug.LogError($"[EditorSessionManager] No token found for API label: {apiLabel} " +
+                               $"(or {tenant.Label}). Received: {received}");
+            }
 
             return matchingToken;
         }
