@@ -20,16 +20,16 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// </summary>
     public static class EditorLoginState
     {
-        private const string TOKEN_KEY = "Reflectis_EditorLogin_Token";
-        private const string TOKEN_EXPIRY_KEY = "Reflectis_EditorLogin_TokenExpiry";
-        private const string TOKEN_REJECTED_KEY = "Reflectis_EditorLogin_TokenRejected";
-        private const string TENANT_KEY = "Reflectis_EditorLogin_Tenant";
-        private const string USERNAME_KEY = "Reflectis_EditorLogin_Username";
-        private const string IS_TENANT_MANAGER_KEY = "Reflectis_EditorLogin_IsTenantManager";
-        private const string LOGGED_IN_APP_KEY = "Reflectis_EditorLogin_App";
-        private const string LOGGED_IN_ENV_KEY = "Reflectis_EditorLogin_Env";
-        private const string AUTH_CLIENT_ID_KEY = "Reflectis_EditorLogin_AuthClientId";
-        private const string AUTH_CONFIG_KEY = "Reflectis_EditorLogin_AuthConfig";
+        private const string TOKEN_KEY = "Virtuademy_EditorLogin_Token";
+        private const string TOKEN_EXPIRY_KEY = "Virtuademy_EditorLogin_TokenExpiry";
+        private const string TOKEN_REJECTED_KEY = "Virtuademy_EditorLogin_TokenRejected";
+        private const string TENANT_KEY = "Virtuademy_EditorLogin_Tenant";
+        private const string USERNAME_KEY = "Virtuademy_EditorLogin_Username";
+        private const string IS_TENANT_MANAGER_KEY = "Virtuademy_EditorLogin_IsTenantManager";
+        private const string LOGGED_IN_APP_KEY = "Virtuademy_EditorLogin_App";
+        private const string LOGGED_IN_ENV_KEY = "Virtuademy_EditorLogin_Env";
+        private const string AUTH_CLIENT_ID_KEY = "Virtuademy_EditorLogin_AuthClientId";
+        private const string AUTH_CONFIG_KEY = "Virtuademy_EditorLogin_AuthConfig";
 
         /// <summary>
         /// How long before the real expiry a token is already treated as stale. A single deploy

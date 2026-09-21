@@ -19,7 +19,7 @@ namespace Virtuademy.ScriptingApi
         /// The platform's id for the session, or empty outside one — a world opened from the editor,
         /// for instance.
         /// </summary>
-        /// <remarks>Node: <c>Reflectis Networking: Get Local Player ID</c>.</remarks>
+        /// <remarks>Node: <c>Virtuademy Networking: Get Local Player ID</c>.</remarks>
         string SessionId { get; }
 
         /// <summary>Whether other people can be in this session at all.</summary>
@@ -29,7 +29,7 @@ namespace Virtuademy.ScriptingApi
         /// Whether this client is the one the others follow for authoritative decisions. False in a
         /// single-player session, where there is nobody to be master of.
         /// </summary>
-        /// <remarks>Node: <c>Reflectis Network: IsMaster</c>.</remarks>
+        /// <remarks>Node: <c>Virtuademy Network: IsMaster</c>.</remarks>
         bool IsMasterClient { get; }
 
         /// <summary>
@@ -38,7 +38,7 @@ namespace Virtuademy.ScriptingApi
         /// multiplayer, so it is always safe to read and only meaningful to *compare* between
         /// clients when <see cref="IsMultiplayer"/> is true.
         /// </summary>
-        /// <remarks>Node: <c>Reflectis Networking: Get current network time</c>.</remarks>
+        /// <remarks>Node: <c>Virtuademy Networking: Get current network time</c>.</remarks>
         double NetworkTime { get; }
 
         /// <summary>The addressable name of the environment being played.</summary>
@@ -57,11 +57,11 @@ namespace Virtuademy.ScriptingApi
         /// <summary>
         /// Whether the shard accepts newcomers. Meaningless when <see cref="HasShard"/> is false.
         /// </summary>
-        /// <remarks>Node: <c>Reflectis Networking: Get Current Shard Open State</c>.</remarks>
+        /// <remarks>Node: <c>Virtuademy Networking: Get Current Shard Open State</c>.</remarks>
         bool IsShardOpen { get; }
 
         /// <summary>Opens or closes the local player's shard to newcomers.</summary>
-        /// <remarks>Node: <c>Reflectis Networking: Set Current Shard Open State</c>.</remarks>
+        /// <remarks>Node: <c>Virtuademy Networking: Set Current Shard Open State</c>.</remarks>
         void SetShardOpen(bool open);
 
         /// <summary>The local player's platform id.</summary>
@@ -97,7 +97,7 @@ namespace Virtuademy.ScriptingApi
         /// hands null when there is no such user. A callback rather than a returned task because a
         /// script cannot await one: the whitelist denies <c>System.Threading</c>.
         /// </summary>
-        /// <remarks>Node: <c>Reflectis: Get CMUser by ID</c>.</remarks>
+        /// <remarks>Node: <c>Virtuademy: Get CMUser by ID</c>.</remarks>
         IEnumerator GetUser(int userId, Action<UserView> onFound);
 
         /// <summary>
@@ -122,12 +122,12 @@ namespace Virtuademy.ScriptingApi
         /// <remarks>
         /// The platform's own <c>PlayerData</c> does not cross: the node that raises this has
         /// exactly two ports, <c>UserId</c> and <c>SessionId</c>, and pulled both out of the payload
-        /// on its first line. Node: <c>Reflectis Networking: On Other Player Entered</c>.
+        /// on its first line. Node: <c>Virtuademy Networking: On Other Player Entered</c>.
         /// </remarks>
         event Action<int, string> OtherPlayerEntered;
 
         /// <summary>Someone else left the session. Same two values as <see cref="OtherPlayerEntered"/>.</summary>
-        /// <remarks>Node: <c>Reflectis Networking: On Other Player Left</c>.</remarks>
+        /// <remarks>Node: <c>Virtuademy Networking: On Other Player Left</c>.</remarks>
         event Action<int, string> OtherPlayerLeft;
 }
 }

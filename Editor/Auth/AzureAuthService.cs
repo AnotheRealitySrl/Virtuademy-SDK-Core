@@ -123,7 +123,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary>
         /// The scopes the editor needs: an id token, a refresh token (offline_access, without
         /// which nothing can ever be renewed silently) and access to the profile API that
-        /// exchanges the Azure token for the Reflectis API tokens.
+        /// exchanges the Azure token for the Virtuademy API tokens.
         /// </summary>
         public static string[] BuildScopes(AzureB2CConfig authConfig)
         {
@@ -276,7 +276,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         // Project-local and outside version control, so the cache never follows the project
         // around. Losing it (a Library wipe) costs exactly one interactive login.
         private static string CacheDirectory =>
-            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "Reflectis", "Auth"));
+            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "Virtuademy", "Auth"));
 
         /// <summary>
         /// Wires MSAL's cache to a file under Library/. Keyed by client id and authority so

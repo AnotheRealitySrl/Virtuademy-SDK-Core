@@ -22,7 +22,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// Owns the editor's authenticated session: acquires it, renews it before it expires, and
     /// replays a request once when the server rejects a token we believed was still good.
     ///
-    /// Every editor tool that calls a Reflectis API must go through
+    /// Every editor tool that calls a Virtuademy API must go through
     /// <see cref="SendAuthorizedAsync"/> (or at least await <see cref="EnsureValidTokenAsync"/>
     /// immediately before each request). Reading <c>EditorLoginState.BearerToken</c> once and
     /// reusing it across a long operation is exactly the bug this class exists to prevent: a
@@ -55,7 +55,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         {
             if (!EditorLoginState.HasSession)
             {
-                Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Reflectis / Show available tenants'.");
+                Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Virtuademy / Show available tenants'.");
                 return Task.FromResult(false);
             }
 
@@ -112,7 +112,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         /// <summary>
         /// Completes a login for an already-resolved tenant and auth config: acquires the Azure
-        /// token, exchanges it for the tenant's Reflectis token, reads the role and stores the
+        /// token, exchanges it for the tenant's Virtuademy token, reads the role and stores the
         /// session together with everything a later renewal needs.
         /// </summary>
         public static async Task<bool> LoginAsync(Tenant tenant, AzureB2CConfig authConfig, string clientId,
@@ -189,7 +189,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 // Sessions stored before the auth config was persisted cannot be renewed: the
                 // client id and policy needed to talk to Azure were never written down.
                 Debug.LogError("[EditorSessionManager] The stored session cannot be renewed automatically " +
-                               "(it predates automatic token refresh). Log in again via 'Reflectis / Show available tenants'.");
+                               "(it predates automatic token refresh). Log in again via 'Virtuademy / Show available tenants'.");
                 return false;
             }
 
@@ -246,7 +246,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Exchanges an Azure access token for the Reflectis token of this tenant's API label.
+        /// Exchanges an Azure access token for the Virtuademy token of this tenant's API label.
         /// </summary>
         private static async Task<JwtToken> FetchTenantTokenAsync(Tenant tenant, string accessToken)
         {
