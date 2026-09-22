@@ -3,7 +3,7 @@
   "displayName": "Virtuademy-SDK-Core",
   "version": "0.3.0",
   "unity": "2020.1",
-  "description": "Platform-context contracts and the wire types they hand back: the one point where the creator graph and the external-app graph meet. No transport and no credentials.",
+  "description": "The creator-facing scripting surface and the platform transport: the interpreted-script API a world may name, the HTTP client base every API client derives from, and the Configuration API client with its wire types.",
   "keywords": [
     "unity"
   ],
