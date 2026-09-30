@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using System.Collections;
 
@@ -26,8 +26,8 @@ namespace Virtuademy.ScriptingApi
         bool IsMultiplayer { get; }
 
         /// <summary>
-        /// Whether this client is the one the others follow for authoritative decisions. False in a
-        /// single-player session, where there is nobody to be master of.
+        /// Whether this client is the one the others follow for authoritative decisions. True in a
+        /// single-player session, where there is nobody other than the current player.
         /// </summary>
         /// <remarks>Node: <c>Virtuademy Network: IsMaster</c>.</remarks>
         bool IsMasterClient { get; }
