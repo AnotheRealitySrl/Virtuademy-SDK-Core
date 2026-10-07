@@ -43,11 +43,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private const string settings_folder_path = "Assets/Editor/TenantConfiguration";
         private const string settings_configuration_path = "TenantConfiguration.asset";
 
-        [MenuItem("Virtuademy/Show available tenants")]
+        [MenuItem("Virtuademy/Available Tenants")]
         public static void ShowExample()
         {
             TenantSelectionWindow wnd = GetWindow<TenantSelectionWindow>();
-            wnd.titleContent = new GUIContent("Show available tenants");
+            wnd.titleContent = new GUIContent("Available Tenants");
         }
 
         public void CreateGUI()

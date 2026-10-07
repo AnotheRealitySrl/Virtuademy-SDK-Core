@@ -103,7 +103,7 @@ statically (`IsInstalled`); editor tooling with no application around it constru
 
 ### `Virtuademy.SDK.Core.Editor`
 
-The tenant-switch tooling, and the package's only menu item, `Virtuademy/Show available tenants` →
+The tenant-switch tooling, and the package's only menu item, `Virtuademy/Available Tenants` →
 `TenantSelectionWindow`. Beside it: `AppConfigurationWindow` + `AppConfigurationSettings`,
 `TenantSwitch.Apply` (read the tenant the selected app belongs to, then write the two generated
 assets) and `PlatformConfigWriter`. `TenantSwitch` is what a project *without* an

@@ -55,7 +55,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         {
             if (!EditorLoginState.HasSession)
             {
-                Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Virtuademy / Show available tenants'.");
+                Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Virtuademy / Available Tenants'.");
                 return Task.FromResult(false);
             }
 
@@ -189,7 +189,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 // Sessions stored before the auth config was persisted cannot be renewed: the
                 // client id and policy needed to talk to Azure were never written down.
                 Debug.LogError("[EditorSessionManager] The stored session cannot be renewed automatically " +
-                               "(it predates automatic token refresh). Log in again via 'Virtuademy / Show available tenants'.");
+                               "(it predates automatic token refresh). Log in again via 'Virtuademy / Available Tenants'.");
                 return false;
             }
 
