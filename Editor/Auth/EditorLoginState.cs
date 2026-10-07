@@ -188,6 +188,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
+        /// The moment <see cref="IsTokenValid"/> turns false on its own: the expiry minus
+        /// <see cref="ExpiryMargin"/>. Status labels show this one rather than the expiry, so the
+        /// time they announce is the time they change. Null when the expiry is unknown.
+        /// </summary>
+        public static DateTime? TokenUsableUntilUtc => TokenExpiryUtc - ExpiryMargin;
+
+        /// <summary>
+        /// True when the server answered 401 to the current token before its expiry.
+        /// </summary>
+        public static bool IsTokenRejected => GetString(TOKEN_REJECTED_KEY) == "1";
+
+        /// <summary>
         /// True when a login happened at some point, regardless of whether the token is still
         /// good. A session that only needs renewing is still a session.
         /// </summary>
@@ -204,7 +216,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 if (!HasSession)
                     return false;
 
-                if (GetString(TOKEN_REJECTED_KEY) == "1")
+                if (IsTokenRejected)
                     return false;
 
                 DateTime? expiry = TokenExpiryUtc;
@@ -248,6 +260,14 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         public static event Action OnLoginStateChanged;
 
+        /// <summary>
+        /// The token behind the session changed — renewed, or rejected by the server — while who
+        /// is logged in did not. Raised from inside the API call that renewed it, so subscribers
+        /// must only re-render (status labels), never reload data or start requests: that is what
+        /// <see cref="OnLoginStateChanged"/> is for, and why it is not raised here.
+        /// </summary>
+        public static event Action OnTokenChanged;
+
         public static void Set(string token, DateTime? tokenExpiryUtc, Tenant tenant, string username,
                                bool isTenantManager = false, string app = null, string env = null,
                                string authClientId = null, AzureB2CConfig authConfig = null)
@@ -271,7 +291,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// Deliberately does NOT raise <see cref="OnLoginStateChanged"/>: subscribers rebuild
         /// their UI and reload data on that event, and a token rotation happens *inside* their own
         /// API calls. Firing it here would re-enter them mid-request. Who the user is logged in as
-        /// has not changed — only the token behind it.
+        /// has not changed — only the token behind it, which <see cref="OnTokenChanged"/> reports.
         /// </summary>
         public static void UpdateToken(string token, DateTime? tokenExpiryUtc, string username = null)
         {
@@ -280,17 +300,20 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             if (!string.IsNullOrEmpty(username))
                 Username = username;
+
+            OnTokenChanged?.Invoke();
         }
 
         /// <summary>
         /// Marks the token unusable without dropping the session, so the next authenticated call
         /// renews it. Called when the server answers 401 to a token we believed still valid
         /// (revoked, rotated, or clock skew between us and the API).
-        /// Silent for the same reason as <see cref="UpdateToken"/>.
+        /// Raises <see cref="OnTokenChanged"/> only, for the same reason as <see cref="UpdateToken"/>.
         /// </summary>
         public static void MarkTokenExpired()
         {
             SetString(TOKEN_REJECTED_KEY, "1");
+            OnTokenChanged?.Invoke();
         }
 
         public static void Clear()

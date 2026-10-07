@@ -35,6 +35,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private Label tenantMismatchLabel;
         private Button loginButton;
         private Button logoutButton;
+        private IVisualElementScheduledItem sessionExpiryRefresh;
 
         private ScrollView scrollView;
         private List<Toggle> toggles;
@@ -156,6 +157,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             // Subscribe to login state changes and asset changes
             EditorLoginState.OnLoginStateChanged += OnLoginStateChanged;
+            EditorLoginState.OnTokenChanged += UpdateLoginUI;
             ObjectChangeEvents.changesPublished += OnObjectChanged;
 
             // Initial UI state
@@ -167,6 +169,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private void OnDestroy()
         {
             EditorLoginState.OnLoginStateChanged -= OnLoginStateChanged;
+            EditorLoginState.OnTokenChanged -= UpdateLoginUI;
             ObjectChangeEvents.changesPublished -= OnObjectChanged;
         }
 
@@ -326,12 +329,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 string userPart = !string.IsNullOrEmpty(username) ? $" - {username}" : string.Empty;
                 string rolePart = EditorLoginState.IsTenantManager ? " [TenantManager]" : "";
 
-                // An expired token is not an error state: the next operation renews it. Say so,
-                // instead of showing a green "logged in" that hides a round trip to Azure.
-                bool tokenValid = EditorLoginState.IsTokenValid;
-                string sessionPart = tokenValid
-                    ? $" (session until {EditorSessionManager.DescribeExpiry()})"
-                    : " - session expired, will be renewed on the next operation";
+                string sessionPart = EditorSessionManager.DescribeSession(out bool tokenValid);
 
                 loginStatusLabel.text = $"Logged in: {tenantLabel}{userPart}{rolePart}{sessionPart}";
                 loginStatusLabel.style.color = tokenValid
@@ -348,6 +346,27 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 loginButton.style.display = loggedIn ? DisplayStyle.None : DisplayStyle.Flex;
             if (logoutButton != null)
                 logoutButton.style.display = loggedIn ? DisplayStyle.Flex : DisplayStyle.None;
+
+            ScheduleSessionExpiryRefresh();
+        }
+
+        /// <summary>
+        /// The label goes stale on its own when the token expires with nothing else happening:
+        /// re-render it once, right after that moment. One run per token, re-armed on every
+        /// render, so a renewal moves it and a logout drops it.
+        /// </summary>
+        private void ScheduleSessionExpiryRefresh()
+        {
+            sessionExpiryRefresh?.Pause();
+            sessionExpiryRefresh = null;
+
+            DateTime? usableUntil = EditorLoginState.TokenUsableUntilUtc;
+            if (!EditorLoginState.IsTokenValid || usableUntil == null)
+                return;
+
+            // One second past the moment, so IsTokenValid has already flipped when it runs.
+            long delayMs = (long)Math.Max(0, (usableUntil.Value - DateTime.UtcNow).TotalMilliseconds) + 1000;
+            sessionExpiryRefresh = loginStatusLabel.schedule.Execute(UpdateLoginUI).StartingIn(delayMs);
         }
 
         private void UpdateMismatchWarning()

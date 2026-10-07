@@ -171,6 +171,28 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             return expiry.Value.ToLocalTime().ToString("HH:mm:ss");
         }
 
+        /// <summary>
+        /// The session part of the login status labels. An expired token is not an error state —
+        /// the next operation renews it, silently while Azure still holds a refresh token — so the
+        /// text says when it expired and that nothing needs doing, instead of a green "logged in"
+        /// that hides a possible login prompt. The time shown is the one at which the label
+        /// changes (<see cref="EditorLoginState.TokenUsableUntilUtc"/>), not the raw expiry.
+        /// </summary>
+        public static string DescribeSession(out bool tokenValid)
+        {
+            tokenValid = EditorLoginState.IsTokenValid;
+            DateTime? usableUntil = EditorLoginState.TokenUsableUntilUtc;
+            string time = usableUntil?.ToLocalTime().ToString("HH:mm") ?? "unknown";
+
+            if (tokenValid)
+                return $" (session until {time})";
+
+            if (EditorLoginState.IsTokenRejected)
+                return " - session rejected by the server, it will be renewed automatically on the next operation";
+
+            return $" - session expired at {time}, it will be renewed automatically on the next operation";
+        }
+
         private static async Task<HttpResponseMessage> SendOnceAsync(Func<HttpRequestMessage> requestFactory, HttpClient client)
         {
             using HttpRequestMessage request = requestFactory();
