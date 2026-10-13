@@ -20,6 +20,75 @@
   content delivery, its only two uses are in the application, and an authored world has no
   business naming it. The `Catalog` port left `Expose: CMEnvironment` with it — the one port this
   split removes, so a graph that read it has to be re-authored.
+- **`Virtuademy.ScriptingApi`**, the assembly a creator's interpreted script may name. It opens
+  with the seventeen analytics types — `AnalyticDTO`, the three xAPI types, the six experience
+  records and the four enums — which had to stay reachable because the shipped Visual Scripting
+  nodes build xAPI statements out of them. It declares no first-party reference, which is the
+  condition for the server-side whitelist to admit it.
+- **`IVirtuademyFramework`, the entry point to what only the platform knows.** An interface with
+  static members, so the surface and the way to reach it are one declaration: `IsAvailable`,
+  `Current` (throws `InvalidOperationException` when nothing has installed an implementation,
+  rather than returning null) and the `Installed` event for code that initialised first. Three
+  groups hang off it:
+  - `ISessionApi`: the session and local-user scalars, the `LocalUser`, `Details` and
+    `Environment` views, `SetShardOpen`, `GetUser`, `FindExperience`, `JoinExperience`, and the
+    `OtherPlayerEntered` / `OtherPlayerLeft` events, flattened to a user id and a session id.
+  - `ISaveDataApi`: `Get`, `Set`, `Delete` and `SubmitLeaderboardRecord`.
+  - `IAnalyticsApi`: `Send` and `GenerateExperienceGuid`.
+
+  The line between this surface and `IVirtuademyGameplay` in `Virtuademy-SDK-Environments` is
+  server-held state, not audience: which session this is, what the local player has saved and
+  what this run reports about the learner exist nowhere but the platform. `Install` is
+  `internal` and `[InternalsVisibleTo]` opens it to one assembly,
+  `Virtuademy.Worlds.ScriptingApiBackend`, the application's own — a script references this
+  assembly in full, so a public installer would let one script replace the surface every other
+  script calls.
+
+  The shape is written to the interpreter's budget: no `Task` (`System.Threading` is denied), no
+  generic member, no `Nullable<T>`. Anything asynchronous returns an `IEnumerator` a script waits
+  on with `yield return`, or takes an `Action` that receives the result. An implementation must
+  keep the public method itself out of an iterator body: that body would not run until the first
+  `MoveNext`, so a caller who ignores the return value would never see the work start.
+- **The editor tenant switch moves here, so an app developer can reach it.** It was in the
+  authoring package's editor assembly, which an external app does not install. New assembly
+  `Virtuademy.SDK.Core.Editor` holds `TenantSelectionWindow` (menu `Virtuademy/Available Tenants`),
+  `AppConfigurationWindow`, `AppConfigurationSettings`, `PlatformConfigWriter`, the three bases an
+  application extends (`BuildScriptBase`, `AbstractAppConfigurator`, `AbstractPlatformSettings`)
+  and the editor-login helpers the window needs (`AzureAuthService`, `EditorSessionManager`,
+  `EditorLoginState`, `EditorApiEndpoint`, `JwtBearerInspector`). The three MSAL libraries the
+  sign-in needs are bundled under `Editor/Microsoft.Identity/` rather than declared through
+  NuGetForUnity, which a package fetched by git URL cannot ask for.
+- **`TenantSwitch`: the tenant switch works in a project with no application of its own.**
+  `TenantSwitch.Apply` reads the tenant and writes the two generated assets, `PlatformEndpoints`
+  and `PlatformCredentials`. The window's change-config button is always shown now and runs it
+  when the project has no `AbstractAppConfigurator`; with one, the configurator runs and calls
+  into it. Before, such a project could pick a tenant and got nothing written.
+
+  The `Configuration` endpoint comes from the app config (`ApiBaseUrl`, `ApiVersion`), not from
+  discovery, and is written whether or not discovery answered: asking the platform where the
+  Configuration API lives needs to know already. A loopback address in the app config wins over
+  what discovery reports, so a switch driven from a local API does not record the deployed
+  hostname and undo itself on the next run. The endpoint asset is merged, never replaced, so a
+  partial answer does not drop addresses it already held.
+- **`LaunchScheme` and `AndroidLaunchSchemeInjector`: the URI scheme the platform launches an
+  external app with is derived, not typed twice.** `LaunchScheme.Derive` returns `v` plus the whole
+  app id (`va1728f51-a525-44b9-a737-b482452f587b`), `UriFor` returns it as the `scheme://` prefix
+  the launcher opens, and `IsValid` checks it; it is runtime code, so the platform application and
+  the build compute the same value. The scheme comes from the credential in the app config and
+  there is no override, on purpose: an override is a way to make the two halves disagree, and the
+  failure is silent. On an Android build the injector adds a `VIEW` intent filter for it to the
+  launcher activity of the generated Gradle project; it adds nothing when there is no scheme or
+  the scheme is already claimed. The tenant switch logs the value.
+- `ApiClientBase.TokenSource`, a `Func<ITokenProvider>` resolved inside the call. Set it instead of
+  `Tokens` when the provider does not outlive the client: a framework system is re-created across a
+  scene load and may not exist yet when its owner initialises. `Tokens` still wins when both are
+  set.
+- `TenantConfigurationClient` and the tenant wire DTOs: the Configuration API client, extracted from
+  the application system that used to be it, so nothing in the creator graph needs a framework to
+  read a tenant configuration.
+- `ApiClientBase.AdoptConnection`, so a second client can reuse a connection another one resolved
+  rather than resolving its own.
+- The transport assembly `Virtuademy.SDK.Core.Client` (`…Interface.Client` before this rename).
 
 ### Changed
 - **The DTOs and the platform contracts left for `Virtuademy-SDK-Library`.** The assemblies
@@ -27,17 +96,6 @@
   `IPlatformContext`, `IPlatformAuthentication` and the five value types all belong to the HTTP
   client's side of the line, and keeping them here meant a creator installed the platform's wire
   format in order to author a world.
-
-### Added
-- **`Virtuademy.ScriptingApi`**, the assembly a creator's interpreted script may name. It opens
-  with the seventeen analytics types — `AnalyticDTO`, the three xAPI types, the six experience
-  records and the four enums — which had to stay reachable because the shipped Visual Scripting
-  nodes build xAPI statements out of them.
-
-  It declares no first-party reference, which is the condition for the server-side whitelist to
-  admit it, and it is where the platform contracts and the client-model base types are headed.
-
-### Changed
 - **Renamed.** The package id becomes `com.anotherealitysrl.virtuademy-sdk-core` and the assembly
   `Virtuademy.SDK.Core`; the wire assembly becomes `Virtuademy.SDK.ApiData.Wire`. The name
   `Virtuademy.SDK.Core` was in use by the framework package, which took `Virtuademy.SystemCore` in
@@ -50,19 +108,69 @@
   planned. The rename was taken now, while it costs a republication that was going to happen anyway,
   rather than after it costs a migration. Creator projects carry across with the rename migrator in
   `Virtuademy-SDK-Environments`, which rewrites `$type` values in Visual Scripting graphs.
-- The `displayName` is now `Virtuademy-SDK-Core`, hyphenated like every sibling package.
+- The `displayName` is now `Virtuademy-SDK-Core`, hyphenated like every sibling package, and the
+  `description` says what the package is now: the scripting surface and the transport, not the
+  platform contracts.
+- **The editor login speaks Virtuademy.** The `EditorPrefs` keys `Reflectis_EditorLogin_*` become
+  `Virtuademy_EditorLogin_*` and the token cache moves to `Library/Virtuademy/Auth`, so everyone
+  logs in once more after updating. The menu entry and window title `Show available tenants`
+  become `Available Tenants` (`Virtuademy/Available Tenants`); `Virtuademy-SDK-Environments` opens
+  the window by that path, so release the two packages together.
+- The utilities the runtime imports are `SPACS.Utilities` now. `JwtToken` and `HmacCredential` stay
+  in `Virtuademy.SDK.Core.Utilities`, which is why both imports sit side by side in some files.
+- The README describes the package as it is: five assemblies, the two generated assets and which
+  of them is a secret, and where the sibling gameplay surface lives.
 
-### Added
-- `TenantConfigurationClient` and the tenant wire DTOs: the Configuration API client, extracted from
-  the application system that used to be it, so nothing in the creator graph needs a framework to
-  read a tenant configuration.
-- `ApiClientBase.AdoptConnection`, so a second client can reuse a connection another one resolved
-  rather than resolving its own.
-- The transport assembly `Virtuademy.SDK.Core.Client` (`…Interface.Client` before this rename).
+### Breaking
+- **The package id and the assemblies changed, and the DTOs and platform contracts are not here.**
+  Anything that names `com.anotherealitysrl.virtuademy-sdk-core` by its previous id, or the
+  assemblies `Virtuademy.SDK.Core` and `Virtuademy.SDK.ApiData.Wire`, must follow them: the wire
+  DTOs, `IPlatformContext`, `IPlatformAuthentication` and the five value types are in
+  `Virtuademy-SDK-Library` (assembly `Virtuademy.SDK.Library`). The rename migrator in
+  `Virtuademy-SDK-Environments` rewrites creator projects.
+- **`Expose: CMEnvironment` has no `Catalog` port.** A graph that read it must be re-authored;
+  there is no view to land on.
+- **The WebSocket stack is not in this package.** `WebSocketHandler`, `WebGLWebSocketHandler`,
+  `WebSocketMessagesHandler`, `IWebSocketHandler`, `IWebSocketListener`, `BaseWebSocketListener`
+  and the WebGL `webSocketClient.jslib` live in `Virtuademy-SDK-Library`, with the new
+  `WebSocketClient` registry (address to handler, the wait on a connection that is still opening,
+  scheme normalisation) beside them. The namespace is unchanged, so a project that used them needs
+  an assembly reference to that package and no source edit. It matters to code built against an
+  earlier `develop`, where they were part of this package's transport; a creator no longer
+  receives a socket they never reach.
+- **`ILocalizationApi`, `IScreenApi`, `IHelpApi` and `IPlatformApi` are not in `Virtuademy.ScriptingApi`.**
+  They are in `Virtuademy.Environments.ScriptingApi` (`Virtuademy-SDK-Environments`) and are reached
+  through `IVirtuademyGameplay`, not `IVirtuademyFramework`. They sat here for a few commits on
+  `develop` and were never in a tagged release; code that was built against that state changes the
+  namespace and the entry point.
+- **`WorldOperation` does not exist; the thirteen members that returned it return `IEnumerator`.**
+  Four of them are in this package (`GetUser`, `FindExperience`, `JoinExperience`,
+  `GenerateExperienceGuid`). Wait with `yield return`, or pass a callback; a handle can no longer be
+  held and polled. Like the previous item, this only concerns code built against `develop` between
+  the two commits.
+- **The tenant switch left the authoring package's editor assembly.** Its types are in
+  `Virtuademy.SDK.Core.Editor`, which `Virtuademy.SDK.Environments.Editor` references; an assembly
+  that named them needs that reference. The five editor-login helpers change namespace from
+  `Virtuademy.SDK.Environments.Editor` to `Virtuademy.SDK.TenantConfiguration.Editor`.
 
 ### Fixed
 - A token provider is no longer copied along with a connection: the two have different lifetimes,
   and copying the provider meant adopting a null one.
+- **The editor finds the Application API token of a tenant provisioned under the current
+  convention.** Those tenants label it `<TenantLabel>Application`, so the bare-label match found
+  nothing; the bare label stays as a fallback for tenants provisioned before. The failure log lists
+  the labels that did come back, which tells "no token was minted" from "minted under a label we
+  do not match".
+- **The tenant window's session label follows the token.** It turns yellow at the moment the token
+  stops being usable (expiry minus `ExpiryMargin`) instead of staying green until the next
+  login/logout, and shows the new expiry after a silent renewal. New
+  `EditorLoginState.OnTokenChanged`, raised on renewal and on a server 401, re-renders the label
+  only; `OnLoginStateChanged` stays out of token rotations. `EditorSessionManager.DescribeSession`
+  is the one text for both status labels. No automatic logout: an expired token is renewed from the
+  MSAL refresh token, and a logout would break a deploy in progress. The Addressables window in
+  `Virtuademy-SDK-Environments` uses the new members, so release the two together.
+- `package.json` declares `com.unity.modules.unitywebrequest`, which the HTTP client names: a project
+  that installs the package alone no longer relies on the consumer having asked for the module.
 
 ## v0.2.0
 
