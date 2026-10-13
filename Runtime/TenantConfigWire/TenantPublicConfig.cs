@@ -21,6 +21,7 @@ namespace Virtuademy.SDK.TenantConfiguration
     public class TenantPublicConfig
     {
         [SerializeField] private List<string> supportedLanguages = new();
+        [SerializeField] private string platformVersion;
 
         /// <summary>
         /// Languages this tenant supports, in order of preference. First
@@ -29,5 +30,12 @@ namespace Virtuademy.SDK.TenantConfiguration
         /// synthetic <c>["en"]</c> (single-language, switcher hidden).
         /// </summary>
         public List<string> SupportedLanguages => supportedLanguages;
+
+        /// <summary>
+        /// Platform version the tenant is pinned to, <c>year.minor.patch</c>
+        /// (<c>2026.6.0</c>). Null when the tenant is not pinned to a version,
+        /// or when the Configuration-API predates the field.
+        /// </summary>
+        public string PlatformVersion => string.IsNullOrWhiteSpace(platformVersion) ? null : platformVersion;
     }
 }

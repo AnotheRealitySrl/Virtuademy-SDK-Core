@@ -1,5 +1,12 @@
 # Release notes
 
+## Unreleased
+
+### Added
+- **`TenantPublicConfig.PlatformVersion`**: the platform version the tenant is pinned to
+  (`2026.6.0`), from the Configuration-API's `config-public` field `platformVersion`; null when
+  the tenant is not pinned or the API predates the field. Additive: warrants a minor bump.
+
 ## v0.3.0
 
 ### Added
