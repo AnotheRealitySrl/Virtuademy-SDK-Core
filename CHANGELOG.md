@@ -1,12 +1,5 @@
 # Release notes
 
-## Unreleased
-
-### Added
-- **`TenantPublicConfig.PlatformVersion`**: the platform version the tenant is pinned to
-  (`2026.6.0`), from the Configuration-API's `config-public` field `platformVersion`; null when
-  the tenant is not pinned or the API predates the field. Additive: warrants a minor bump.
-
 ## v0.3.0
 
 ### Added
@@ -96,6 +89,9 @@
 - `ApiClientBase.AdoptConnection`, so a second client can reuse a connection another one resolved
   rather than resolving its own.
 - The transport assembly `Virtuademy.SDK.Core.Client` (`…Interface.Client` before this rename).
+- `TenantPublicConfig.PlatformVersion`: the platform version the tenant is pinned to (`2026.6.0`),
+  from the Configuration-API's `config-public` field `platformVersion`; null when the tenant is not
+  pinned or the API predates the field.
 
 ### Changed
 - **The DTOs and the platform contracts left for `Virtuademy-SDK-Library`.** The assemblies
