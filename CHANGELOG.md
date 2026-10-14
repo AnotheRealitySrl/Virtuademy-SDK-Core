@@ -1,9 +1,16 @@
 # Release notes
 
-## Unreleased
+## v0.3.0
 
-### Added
-- **`AppConfigurationImporter.Import`: connect the project to a tenant without clicking** (minor bump). What
+### Added to this release on 2026-10-14 (tag moved)
+
+The `v0.3.0` tag was moved on 2026-10-14 onto the commit that adds the changes below. They are editor-only
+(command lines, editor windows); nothing a published world or the app loads changed. A project resolved before
+keeps the earlier commit until it re-resolves: the setup's editor-start update or `SetupCli -vdSetupSteps
+resolve` does it. SDK-Environments v10.0.0, moved the same day, needs this commit.
+
+#### Added
+- **`AppConfigurationImporter.Import`: connect the project to a tenant without clicking**. What
   "Connect the SDK to your tenant" does by hand: the file downloaded from the Back Office (**Download SDK
   Environments Config**) goes into the project (`Assets/Editor/TenantConfiguration`, the folder of the settings
   asset, unless it already is under `Assets/`), into the **App Assets** of the `AppConfigurationSettings` asset,
@@ -24,15 +31,12 @@
   this method.
 - `EditorSessionManager.InteractiveLoginAllowed`.
 
-### Changed
-- **`EditorSessionManager` never starts an interactive login in batch mode** (behavior change, with the minor
-  bump above). `EnsureValidTokenAsync` and everything that goes through it (`SendAuthorizedAsync`) read their
+#### Changed
+- **`EditorSessionManager` never starts an interactive login in batch mode** (behaviour change). `EnsureValidTokenAsync` and everything that goes through it (`SendAuthorizedAsync`) read their
   `allowInteractive` argument through `InteractiveLoginAllowed`, which is false when the editor runs in batch
   mode: a deploy, a script verification or a policy fetch with an expired session used to open the system
   browser on a machine where nobody could answer it, and wait for ever. They now fail as they do when the
   login is not allowed, and the caller says to log in.
-
-## v0.3.0
 
 ### Added
 - **The client-model views.** `UserView`, `SessionView`, `ExperienceView`, `EnvironmentView` and
