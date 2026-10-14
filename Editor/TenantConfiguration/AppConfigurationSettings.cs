@@ -84,6 +84,45 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             return all.FirstOrDefault(x => x.IsSelected) ?? all.FirstOrDefault();
         }
 
+        /// <summary>The folder a settings asset is created in when the project has none.</summary>
+        public const string DefaultFolder = "Assets/Editor/TenantConfiguration";
+
+        /// <summary>The file name of a settings asset created in <see cref="DefaultFolder"/>.</summary>
+        public const string DefaultFileName = "TenantConfiguration.asset";
+
+        /// <summary>
+        /// <see cref="FindSelected"/>, and when the project has no settings asset, a new one at
+        /// <see cref="DefaultFolder"/>. What the Available Tenants window opens with; the
+        /// configuration import calls it too, so a project that never opened the window can still be
+        /// connected from the command line.
+        /// </summary>
+        public static AppConfigurationSettings FindOrCreate()
+        {
+            AppConfigurationSettings existing = FindSelected();
+            if (existing != null)
+                return existing;
+
+            EnsureFolderExists(DefaultFolder);
+            AppConfigurationSettings created = CreateInstance<AppConfigurationSettings>();
+            AssetDatabase.CreateAsset(created, $"{DefaultFolder}/{DefaultFileName}");
+            AssetDatabase.SaveAssets();
+            return created;
+        }
+
+        internal static void EnsureFolderExists(string folderPath)
+        {
+            string[] folders = folderPath.Split('/');
+            string current = folders[0];
+
+            for (int i = 1; i < folders.Length; i++)
+            {
+                string next = current + "/" + folders[i];
+                if (!AssetDatabase.IsValidFolder(next))
+                    AssetDatabase.CreateFolder(current, folders[i]);
+                current = next;
+            }
+        }
+
         public List<(string, Dictionary<string, AppIdentification>)> GetAppIdentification(List<TextAsset> configurationAssets)
         {
             List<(string, Dictionary<string, AppIdentification>)> apiConfigs = new();

@@ -1,5 +1,37 @@
 # Release notes
 
+## Unreleased
+
+### Added
+- **`AppConfigurationImporter.Import`: connect the project to a tenant without clicking** (minor bump). What
+  "Connect the SDK to your tenant" does by hand: the file downloaded from the Back Office (**Download SDK
+  Environments Config**) goes into the project (`Assets/Editor/TenantConfiguration`, the folder of the settings
+  asset, unless it already is under `Assets/`), into the **App Assets** of the `AppConfigurationSettings` asset,
+  and is selected (its app, from the file name, and the file's first environment, or the one asked for). The file
+  is validated (an environment with an app id, a secret and an API base URL) and nothing of its content is logged
+  or quoted in an error. **It holds the app's secret, so the importer refuses to put it where git would track
+  it:** when the project is inside a git work tree it asks git (`git check-ignore`) about the destination (and the
+  settings asset, which keeps a copy of the credential, and the source when it already is under `Assets/`) and,
+  when one is not ignored, throws `AppConfigurationImporter.SecretNotIgnoredException` before writing anything,
+  unless the caller passes `allowTracked: true`. Not a git work tree, or git missing: it proceeds with a warning.
+  A creator project already ignores `Assets/Editor/TenantConfiguration/` (the team's template does). The Available
+  Tenants window has an **Import configuration file...** button that calls it; on a refusal it shows a dialog
+  that names the risk, and only its third button, **Import anyway**, repeats the import with the override (Enter,
+  Escape and a batch run all end in "not imported"). `EnvironmentsCli tenant-config`
+  (`Virtuademy-SDK-Environments`) calls it too. Idempotent.
+- `AppConfigurationSettings.FindOrCreate()`: the project's settings asset, created at
+  `Assets/Editor/TenantConfiguration` when there is none. The window opened with the same logic, which is now
+  this method.
+- `EditorSessionManager.InteractiveLoginAllowed`.
+
+### Changed
+- **`EditorSessionManager` never starts an interactive login in batch mode** (behavior change, with the minor
+  bump above). `EnsureValidTokenAsync` and everything that goes through it (`SendAuthorizedAsync`) read their
+  `allowInteractive` argument through `InteractiveLoginAllowed`, which is false when the editor runs in batch
+  mode: a deploy, a script verification or a policy fetch with an expired session used to open the system
+  browser on a machine where nobody could answer it, and wait for ever. They now fail as they do when the
+  login is not allowed, and the caller says to log in.
+
 ## v0.3.0
 
 ### Added

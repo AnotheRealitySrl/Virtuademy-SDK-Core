@@ -35,6 +35,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private static readonly object renewalLock = new();
         private static Task<bool> renewalInFlight;
 
+        // Read once, on whichever thread first touches this class (the main one in practice):
+        // Application.isBatchMode is an engine call and the renewal below may run elsewhere.
+        private static readonly bool runsInBatchMode = Application.isBatchMode;
+
+        /// <summary>
+        /// Whether the session may fall back to an interactive login (the system browser) when it
+        /// cannot be renewed silently. False in batch mode: nobody is there to answer the browser,
+        /// so the editor would sit waiting for a login that cannot happen. Every
+        /// <c>allowInteractive</c> argument below is read through it, so no caller has to remember.
+        /// </summary>
+        public static bool InteractiveLoginAllowed => !runsInBatchMode;
+
         // Suffix appended to the tenant label to form the Application API token label
         // (tenant "Simbi" -> "SimbiApplication"). Same convention as
         // AuthenticationBridge.ManageTokens in the WebGL bridge — the match rule is
@@ -44,7 +56,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary>
         /// Guarantees a usable token, renewing it if needed. Renewal is silent whenever the MSAL
         /// cache still holds a refresh token; otherwise it falls back to an interactive login when
-        /// <paramref name="allowInteractive"/> allows it.
+        /// <paramref name="allowInteractive"/> allows it — and never in batch mode
+        /// (<see cref="InteractiveLoginAllowed"/>).
         ///
         /// Concurrent callers share a single renewal — N parallel requests finding the same
         /// expired token must not trigger N logins.
@@ -53,6 +66,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// abort: no request made with the current token can succeed.</returns>
         public static Task<bool> EnsureValidTokenAsync(bool allowInteractive = true)
         {
+            allowInteractive &= InteractiveLoginAllowed;
+
             if (!EditorLoginState.HasSession)
             {
                 Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Virtuademy / Available Tenants'.");

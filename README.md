@@ -111,12 +111,21 @@ application-specific configurator needs — which is every external application,
 used to offer a tenant, accept a selection, and write nothing. An application with its own
 configurator calls into it rather than repeating the flow.
 
+`AppConfigurationImporter.Import` connects a project to a tenant the way the docs describe it by hand: the
+file downloaded from the Back Office goes into the project (`Assets/Editor/TenantConfiguration`, next to the
+settings asset), into the App Assets of the settings asset, and is selected. The file holds the app's secret, so
+the import refuses (`SecretNotIgnoredException`) when git does not ignore that folder, unless the caller passes
+`allowTracked`. The window's **Import configuration file...** button and the command line
+(`EnvironmentsCli tenant-config`, in `Virtuademy-SDK-Environments`) both call it. The file holds the app's
+secret: nothing logs its content.
+
 Three `ScriptableObject` bases an application extends: `BuildScriptBase`, `AbstractAppConfigurator`,
 `AbstractPlatformSettings`.
 
 Editor authentication runs on MSAL — `AzureAuthService`, `EditorSessionManager`, `EditorLoginState`,
 `EditorApiEndpoint`, `JwtBearerInspector`, against the three precompiled DLLs under
-`Editor/Microsoft.Identity/`. `AndroidLaunchSchemeInjector` is an
+`Editor/Microsoft.Identity/`. In batch mode a session is renewed silently or not at all:
+`EditorSessionManager.InteractiveLoginAllowed` is false, so no call opens the browser. `AndroidLaunchSchemeInjector` is an
 `IPostGenerateGradleAndroidProject` that writes the launch scheme into the generated Gradle project.
 
 ## What is deliberately absent

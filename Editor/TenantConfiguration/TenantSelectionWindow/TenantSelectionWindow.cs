@@ -41,9 +41,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private List<Toggle> toggles;
         private VisualElement selectedAppConfigSection;
 
-        private const string settings_folder_path = "Assets/Editor/TenantConfiguration";
-        private const string settings_configuration_path = "TenantConfiguration.asset";
-
         [MenuItem("Virtuademy/Available Tenants")]
         public static void ShowExample()
         {
@@ -58,7 +55,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             VisualElement labelFromUXML = m_VisualTreeAsset.Instantiate();
             root.Add(labelFromUXML);
 
-            appConfigurationSettings = FindOrCreateAppConfigurationSettings();
+            appConfigurationSettings = AppConfigurationSettings.FindOrCreate();
 
             // AppConfigurationSettings ObjectField
             ObjectField appConfigSettingsField = root.Q<ObjectField>("AppConfigurationSettingsField");
@@ -74,6 +71,15 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                     RefreshAvailableApps();
                 }
             });
+
+            Button importConfigurationButton = new(OnImportConfigurationClicked)
+            {
+                text = "Import configuration file...",
+                tooltip = "Copies the file downloaded from the Back Office (Download SDK Environments Config) into " +
+                          AppConfigurationImporter.DefaultFolder + ", adds it to the App Assets and selects it."
+            };
+            importConfigurationButton.style.alignSelf = Align.FlexStart;
+            appConfigSettingsField.parent.Add(importConfigurationButton);
 
             selectedAppConfigSection = root.Q<VisualElement>("SelectedAppConfig");
             scrollView = root.Q<ScrollView>();
@@ -485,37 +491,55 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         #endregion
 
-        #region AppConfigurationSettings resolution
+        #region Import of the configuration file
 
-        private AppConfigurationSettings FindOrCreateAppConfigurationSettings()
+        /// <summary>
+        /// The Back Office's "Download SDK Environments Config" file into the project and onto the
+        /// settings asset, through <see cref="AppConfigurationImporter"/> — the same call the
+        /// command line makes.
+        /// </summary>
+        private void OnImportConfigurationClicked()
         {
-            AppConfigurationSettings existing = AppConfigurationSettings.FindSelected();
+            string downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            string file = EditorUtility.OpenFilePanel("Import the tenant configuration file", Directory.Exists(downloads) ? downloads : "", "json");
+            if (string.IsNullOrEmpty(file))
+                return;
 
-            if (existing != null)
-            {
-                return existing;
-            }
-
-            EnsureFolderExists(settings_folder_path);
-            AppConfigurationSettings newSettings = CreateInstance<AppConfigurationSettings>();
-            string assetPath = $"{settings_folder_path}/{settings_configuration_path}";
-            AssetDatabase.CreateAsset(newSettings, assetPath);
-            AssetDatabase.SaveAssets();
-            return newSettings;
+            ImportConfigurationFile(file);
         }
 
-        private void EnsureFolderExists(string folderPath)
+        /// <summary>
+        /// The import behind the button. When git does not ignore where the file would land, the import is
+        /// refused and a dialog names the risk; only an explicit "Import anyway" repeats it with the override. That
+        /// button is the dialog's third one, so Enter, Escape and a dialog nobody can answer (batch mode) all end
+        /// in "not imported".
+        /// </summary>
+        private void ImportConfigurationFile(string file, bool allowTracked = false)
         {
-            string[] folders = folderPath.Split('/');
-            string currentPath = "";
-
-            foreach (string folder in folders)
+            try
             {
-                currentPath = Path.Combine(currentPath, folder);
-                if (!AssetDatabase.IsValidFolder(currentPath))
-                {
-                    AssetDatabase.CreateFolder(Path.GetDirectoryName(currentPath), Path.GetFileName(currentPath));
-                }
+                AppConfigurationImporter.ImportResult result = AppConfigurationImporter.Import(
+                    file, settings: appConfigurationSettings, allowTracked: allowTracked);
+                RefreshAvailableApps();
+                Debug.Log($"[TenantSelectionWindow] Imported {result.AssetPath}: {result.App} / {result.Env} is selected.");
+            }
+            catch (AppConfigurationImporter.SecretNotIgnoredException ex)
+            {
+                Debug.LogError($"[TenantSelectionWindow] The configuration file was not imported: {ex.Message}");
+
+                int choice = EditorUtility.DisplayDialogComplex("The configuration file would be committed",
+                    $"The file holds the app's secret, and git does not ignore '{ex.AssetPath}'. " +
+                    "Importing it there puts the secret one commit away from the repository (and from everyone who clones it).\n\n" +
+                    $"Safer: add {AppConfigurationSettings.DefaultFolder}/ to the project's .gitignore, then import again.",
+                    "Don't import", "Cancel", "Import anyway");
+
+                if (choice == 2)
+                    ImportConfigurationFile(file, allowTracked: true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[TenantSelectionWindow] The configuration file was not imported: {ex.Message}");
+                EditorUtility.DisplayDialog("Import failed", ex.Message, "OK");
             }
         }
 
