@@ -29,6 +29,27 @@ namespace Virtuademy.SDK.Http
         public static readonly string HEAD = UnityWebRequest.kHttpVerbHEAD;
 
         /// <summary>
+        /// Seconds a request created here may take, in total, before Unity aborts it. Applied to
+        /// requests without a body or with a string body; 0 means no limit.
+        /// </summary>
+        /// <remarks>
+        /// Requests had no timeout at all, so an unreachable or stalled server left the caller
+        /// waiting for as long as the platform's own network stack allowed.
+        /// <c>UnityWebRequest.timeout</c> bounds the whole request, transfer included, which is
+        /// why uploads have a separate limit (<see cref="UploadTimeoutSeconds"/>). A caller that
+        /// needs a different limit for one request sets <c>timeout</c> on the request it gets back.
+        /// </remarks>
+        public static int DefaultTimeoutSeconds { get; set; } = 120;
+
+        /// <summary>
+        /// Seconds an upload (<see cref="ERequestBodyType.RawBytes"/> or
+        /// <see cref="ERequestBodyType.MultipartFormData"/>) may take in total. 0, the default, means
+        /// no limit: a large file on a slow connection can legitimately take longer than any fixed
+        /// limit.
+        /// </summary>
+        public static int UploadTimeoutSeconds { get; set; } = 0;
+
+        /// <summary>
         /// Creates a UnityWebRequest for performing an HTTP request.
         /// </summary>
         public static UnityWebRequest CreateHttpRequest(
@@ -127,6 +148,9 @@ namespace Virtuademy.SDK.Http
 
             request.downloadHandler = new DownloadHandlerBuffer();
             request.certificateHandler = certificateHandler;
+            request.timeout = requestBodyType == ERequestBodyType.RawBytes || requestBodyType == ERequestBodyType.MultipartFormData
+                ? Math.Max(0, UploadTimeoutSeconds)
+                : Math.Max(0, DefaultTimeoutSeconds);
 
             if (headers != null)
             {

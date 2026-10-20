@@ -1,5 +1,40 @@
 # Release notes
 
+## Unreleased
+
+Minor bump: additive API, plus behaviour changes an external app will notice (listed under
+Changed).
+
+### Added
+- `ITokenProviderNotifications`, with the event `TokensChanged`: a token provider implements it to
+  tell its clients that the tokens it handed out were cleared (sign-out) or replaced. Separate from
+  `ITokenProvider`, so existing providers keep compiling.
+- `ApiClientBase.TokenRefreshLeeway` (default 30 s).
+- `JwtToken.IsExpired(TimeSpan timeOffset, TimeSpan leeway)`.
+- `HttpHelper.DefaultTimeoutSeconds` (default 120) and `HttpHelper.UploadTimeoutSeconds` (default
+  0, no limit).
+- `ApiResponseError.Display(long statusCode, string content)`.
+
+### Changed
+- **Requests created by `HttpHelper.CreateHttpRequest` time out after 120 s** (`UnityWebRequest.timeout`,
+  which bounds the whole request). They had no timeout. Uploads (`RawBytes`, `MultipartFormData`)
+  keep none. A request that legitimately takes longer needs `timeout` set on it, or the default
+  raised.
+- **A client drops its cached token when its provider raises `TokensChanged`**, and asks again on
+  its next request. Before, a client kept the token it found until that token expired, so after a
+  sign-out and another user's sign-in it went on signing as the first user.
+- **Tokens are refreshed 30 s before they expire**, not at the expiry, and requests on one client
+  that find the token expired together share one refresh.
+- `JwtToken.Expiry` reads a value without an offset as UTC; it converted it as local time, while
+  `IsExpired` compared it as UTC. `IsExpired` now compares against `Expiry`, so a value that
+  carries an offset is converted before the comparison.
+
+### Fixed
+- `ApiResponse<T>`, `ApiResponseArray<T>` and `ApiResponseSearch<T>` threw from the constructor
+  when a failed response's body was not JSON (the HTML page of a 502 from a proxy or gateway) or
+  was `null`: the caller got an exception instead of a failed response. The body is now parsed
+  safely and logged as an excerpt when it is not a problem-details object.
+
 ## v0.3.0
 
 ### Added to this release on 2026-10-14 (tag moved)

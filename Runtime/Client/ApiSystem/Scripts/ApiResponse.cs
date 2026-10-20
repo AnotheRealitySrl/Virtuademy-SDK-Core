@@ -45,9 +45,9 @@ namespace Virtuademy.SDK.Http
         public ApiResponse(long statusCode, string reasonPhrase, string content)
         {
             StatusCode = statusCode;
-            if (!((statusCode >= 200) && (statusCode <= 299)) && !string.IsNullOrWhiteSpace(content))
+            if (!((statusCode >= 200) && (statusCode <= 299)))
             {
-                JsonConvert.DeserializeObject<ApiResponseError>(content).DisplayError();
+                ApiResponseError.Display(statusCode, content);
             }
             ReasonPhrase = reasonPhrase;
             if (typeof(T) == typeof(string))
@@ -78,9 +78,9 @@ namespace Virtuademy.SDK.Http
         public ApiResponseArray(long statusCode, string reasonPhrase, string content, int totalCount = -1)
         {
             StatusCode = statusCode;
-            if (!((statusCode >= 200) && (statusCode <= 299)) && !string.IsNullOrWhiteSpace(content))
+            if (!((statusCode >= 200) && (statusCode <= 299)))
             {
-                JsonConvert.DeserializeObject<ApiResponseError>(content).DisplayError();
+                ApiResponseError.Display(statusCode, content);
             }
             ReasonPhrase = reasonPhrase;
 
@@ -104,9 +104,9 @@ namespace Virtuademy.SDK.Http
         public ApiResponseSearch(long statusCode, string reasonPhrase, string content)
         {
             StatusCode = statusCode;
-            if (!((statusCode >= 200) && (statusCode <= 299)) && !string.IsNullOrWhiteSpace(content))
+            if (!((statusCode >= 200) && (statusCode <= 299)))
             {
-                JsonConvert.DeserializeObject<ApiResponseError>(content).DisplayError();
+                ApiResponseError.Display(statusCode, content);
             }
             ReasonPhrase = reasonPhrase;
             Content = IsSuccess ? JsonConvert.DeserializeObject<ContentSearch>(content) : null;
@@ -149,6 +149,45 @@ namespace Virtuademy.SDK.Http
         public void DisplayError()
         {
             Debug.LogError(Title);
+        }
+
+        /// <summary>
+        /// Logs the error a failed response carries, whatever its body is.
+        /// </summary>
+        /// <remarks>
+        /// The response constructors used to deserialize every non-2xx body as a problem-details
+        /// object. A body that is not JSON (the HTML page a proxy or a gateway answers 502 or 504
+        /// with) threw from the constructor, so the caller got an exception instead of a failed
+        /// response it could test; a body of <c>null</c> threw a NullReferenceException. Either
+        /// way the status code was lost. Now the title is logged when there is one, a short excerpt
+        /// of the body otherwise, and the response is built as usual.
+        /// </remarks>
+        public static void Display(long statusCode, string content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                return;
+            }
+
+            ApiResponseError error = null;
+            try
+            {
+                error = JsonConvert.DeserializeObject<ApiResponseError>(content);
+            }
+            catch (JsonException)
+            {
+                // Not JSON: fall through to the excerpt.
+            }
+
+            if (!string.IsNullOrEmpty(error?.Title))
+            {
+                error.DisplayError();
+                return;
+            }
+
+            const int excerptLength = 200;
+            string excerpt = content.Length > excerptLength ? content.Substring(0, excerptLength) + "..." : content;
+            Debug.LogError($"HTTP {statusCode}: {excerpt}");
         }
     }
 }

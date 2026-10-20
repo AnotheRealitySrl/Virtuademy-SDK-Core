@@ -1,5 +1,6 @@
 using Virtuademy.SDK.Core.Utilities;
 
+using System;
 using System.Threading.Tasks;
 
 using SPACS.Utilities;
@@ -41,5 +42,25 @@ namespace Virtuademy.SDK.Core.Authentication
         /// <see cref="FindToken"/> returns a live one.
         /// </summary>
         Task GetTokens();
+    }
+
+    /// <summary>
+    /// Implemented by a token provider that tells its clients when the tokens it handed out stop
+    /// being the right ones.
+    /// </summary>
+    /// <remarks>
+    /// A client keeps the token it found until that token expires, and only asks the provider
+    /// again when it holds none. Without this signal, a sign-out followed by another user's
+    /// sign-in left every client signing as the first user until that token expired. A separate
+    /// interface rather than a member of <see cref="ITokenProvider"/>, so that existing
+    /// implementations keep compiling; a provider that does not implement it behaves as before.
+    /// </remarks>
+    public interface ITokenProviderNotifications
+    {
+        /// <summary>
+        /// Raised when the provider's token set was cleared (sign-out) or replaced (sign-in,
+        /// refresh). A client drops its cached token and asks again on its next request.
+        /// </summary>
+        event Action TokensChanged;
     }
 }
