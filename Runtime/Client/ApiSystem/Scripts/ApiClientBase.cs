@@ -380,6 +380,8 @@ namespace Virtuademy.SDK.Core.ApiSystem
                     + "provider does not outlive this client — which is the case for a framework "
                     + "system, re-created across a scene load.");
 
+            ObserveTokenProvider(tokenProvider);
+
             if (JwtToken == null)
             {
                 TrySetToken();
@@ -391,11 +393,25 @@ namespace Virtuademy.SDK.Core.ApiSystem
             // "no tokens available" it got back, and the very next line asked that null whether
             // it had expired. The logged error was therefore followed by a NullReference that
             // hid it.
-            if (JwtToken == null || JwtToken.IsExpired(serverTimeOffset))
+            if (JwtToken == null || JwtToken.IsExpired(serverTimeOffset, TokenRefreshLeeway))
             {
                 Debug.LogWarning($"[{Label}]: JWT token is missing or expired. Refreshing token for API label: {ApiLabel}");
 
-                await tokenProvider.GetTokens();
+                // Requests that find the token expired together share one refresh, rather than
+                // each asking the provider for a new token set.
+                refreshInFlight ??= tokenProvider.GetTokens();
+                Task refresh = refreshInFlight;
+                try
+                {
+                    await refresh;
+                }
+                finally
+                {
+                    if (refreshInFlight == refresh)
+                    {
+                        refreshInFlight = null;
+                    }
+                }
 
                 TrySetToken();
             }
@@ -423,6 +439,51 @@ namespace Virtuademy.SDK.Core.ApiSystem
                 }
             }
         }
+
+        /// <summary>
+        /// How long before its expiry a token already counts as expired and is refreshed.
+        /// </summary>
+        /// <remarks>
+        /// With none, a token checked a moment before it expired could expire on the way to the
+        /// server, and the request came back 401.
+        /// </remarks>
+        public TimeSpan TokenRefreshLeeway { get; set; } = TimeSpan.FromSeconds(30);
+
+        private Task refreshInFlight;
+
+        private ITokenProviderNotifications observedProvider;
+
+        /// <summary>
+        /// Listens to the provider this client takes its tokens from, when it can say that its
+        /// tokens changed, so a sign-out reaches the token cached here.
+        /// </summary>
+        /// <remarks>
+        /// Done where the provider is resolved, on every request: <see cref="TokenSource"/> may
+        /// hand back a different provider each time (a framework system re-created across a scene
+        /// load), and the one to listen to is the one in use.
+        /// </remarks>
+        private void ObserveTokenProvider(ITokenProvider tokenProvider)
+        {
+            ITokenProviderNotifications notifications = tokenProvider as ITokenProviderNotifications;
+            if (ReferenceEquals(notifications, observedProvider))
+            {
+                return;
+            }
+
+            if (observedProvider != null)
+            {
+                observedProvider.TokensChanged -= OnTokensChanged;
+            }
+
+            observedProvider = notifications;
+
+            if (observedProvider != null)
+            {
+                observedProvider.TokensChanged += OnTokensChanged;
+            }
+        }
+
+        private void OnTokensChanged() => JwtToken = null;
 
         public async Task<bool> IsAlive()
         {
