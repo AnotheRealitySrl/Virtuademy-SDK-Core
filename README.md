@@ -160,3 +160,39 @@ Editor authentication runs on MSAL — `AzureAuthService`, `EditorSessionManager
   (`…Core.ApiSystem`, `…Core.Authentication`, `…Core.Utilities`, `…SDK.Http`). `ApiResponse` and the
   HTTP helpers sitting under `Virtuademy.SDK.Http` rather than under `Virtuademy.SDK.Core` is the
   visible edge of that.
+- **The browser page at the end of the editor login is MSAL's default**: one line of unstyled text
+  ("Authentication complete. You can return to the application. Feel free to close this browser
+  tab."), served by MSAL's listener on the loopback redirect URI. Decided on 2026-10-16, not done
+  yet: two hosted pages, a success page and an error page, reached by redirect.
+  - Where they live is not decided yet. Most likely with the Virtuademy B2C pages: the `b2cflows`
+    blob container, folder `Virtuademy/`, mirrored in `Virtuademy-Website-Landing/b2c_templates/`.
+    Hosted there, the browser's address bar shows the storage account's host
+    (`spacsglobal.blob.core.windows.net`), which the B2C pages never show: B2C fetches them server
+    side and serves them under `b2clogin.com`.
+  - Success: `.WithSystemWebViewOptions(new SystemWebViewOptions { BrowserRedirectSuccess = … })` on
+    the `AcquireTokenInteractive` call in `AzureAuthService.LoginInteractive`, pointing at the
+    success page. MSAL answers the browser with a `302` to that URL.
+  - Error: MSAL's `BrowserRedirectError` is a fixed URL too and carries nothing of the error (checked
+    against the listener of MSAL 4.61.0, the version this package ships: the `Location` header is
+    the configured URL as it is). The browser's address already holds both values, though
+    (`http://localhost:<port>/?error=…&error_description=…&state=…`). So `HtmlMessageError` is a few
+    lines with no styling: its script copies `error` and `error_description` (never `state`) into
+    the query of the error page and calls `location.replace`; without JavaScript, a link to the same
+    page. MSAL passes `HtmlMessageError` through `string.Format` (`{0}` the code, `{1}` the
+    description), so any brace in it must be doubled. The response declares no charset: keep it
+    ASCII.
+  - The pages follow the Virtuademy B2C pages (`b2c_templates/Virtuademy/`): the light background, a
+    white card with 30px corners, Poppins, the full mark. English or Italian from
+    `navigator.languages`, as B2C picks the sign-in page's language (the editor sends no
+    `ui_locales`). The error page shows the two values as text only (`textContent`, a length cap,
+    the code checked against `^[a-z0-9_]+$`): anyone can build a link to it with text of their
+    choosing.
+  - Costs accepted: the two URLs become a contract every SDK version in the field calls, so they must
+    never move; the pages must be online before the SDK version that uses them ships; when the host
+    does not answer, the user sees a browser error after a sign-in that succeeded; the error details
+    land in the host's access logs (a B2C description carries an error code, a correlation id and a
+    timestamp).
+  - Rejected: embedding the pages in this package (built on 2026-10-16 and not committed: a C# file
+    holding the HTML, the CSS and the mark, too heavy for what it does).
+  - The Configuration Portal's login sidecar (`src-auth/AzureAuthService.cs`) shows the same default
+    page; a query parameter naming the app would let it use the same hosted pages.
