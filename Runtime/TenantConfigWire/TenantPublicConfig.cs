@@ -22,6 +22,8 @@ namespace Virtuademy.SDK.TenantConfiguration
     {
         [SerializeField] private List<string> supportedLanguages = new();
         [SerializeField] private string platformVersion;
+        [SerializeField] private int? tenantKey;
+        [SerializeField] private string environment;
 
         /// <summary>
         /// Languages this tenant supports, in order of preference. First
@@ -37,5 +39,19 @@ namespace Virtuademy.SDK.TenantConfiguration
         /// or when the Configuration-API predates the field.
         /// </summary>
         public string PlatformVersion => string.IsNullOrWhiteSpace(platformVersion) ? null : platformVersion;
+
+        /// <summary>
+        /// Id of the tenant row (<c>config.tenants.ctn_id</c>). Not unique across Configuration-API
+        /// instances: each one has its own Platform DB, so the editor's connection key is this id
+        /// together with the instance's base URL. Null for an app with no tenant (a platform-admin
+        /// app), which therefore cannot become a connection.
+        /// </summary>
+        public int? TenantKey => tenantKey;
+
+        /// <summary>
+        /// Environment of the tenant row, verbatim (<c>Sandbox</c>, <c>PreProduction</c>,
+        /// <c>Production</c>). For display only: operators can edit it, so it never identifies anything.
+        /// </summary>
+        public string Environment => string.IsNullOrWhiteSpace(environment) ? null : environment;
     }
 }

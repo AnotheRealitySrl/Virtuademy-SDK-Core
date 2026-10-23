@@ -1,36 +1,23 @@
-using Newtonsoft.Json;
-
 using Virtuademy.SDK.TenantConfiguration;
 
 using System;
-using System.Globalization;
-
-using UnityEditor;
 
 namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
-    /// Stores editor login state using both SessionState (for runtime) and EditorPrefs (for persistence across editor restarts).
-    /// On domain reload, restores from EditorPrefs if SessionState is empty.
-    ///
-    /// Alongside the token this keeps everything needed to renew it without asking the user
-    /// anything: the expiry, the client id and the resolved auth config. See
-    /// <see cref="EditorSessionManager"/> for the renewal itself — nothing outside it should
-    /// write the token.
+    /// What the editor knows about the login of the project's active connection
+    /// (<see cref="ProjectConnections.ActiveKey"/>), read from the per-user <see cref="ConnectionStore"/>.
+    /// Nothing is kept in SessionState or EditorPrefs any more, and the token is never held here: every
+    /// read goes to the store, so a renewal or a logout done by another process shows at once.
     /// </summary>
+    /// <remarks>
+    /// This is the view the window, the deploy and the other editor tools were written against, kept so they
+    /// keep working with the project's connection. New code names its connection and reads
+    /// <see cref="ConnectionStore.Get"/>. Who writes the session is <see cref="ConnectionLoginService"/> and
+    /// <see cref="EditorSessionManager"/>, nothing else.
+    /// </remarks>
     public static class EditorLoginState
     {
-        private const string TOKEN_KEY = "Virtuademy_EditorLogin_Token";
-        private const string TOKEN_EXPIRY_KEY = "Virtuademy_EditorLogin_TokenExpiry";
-        private const string TOKEN_REJECTED_KEY = "Virtuademy_EditorLogin_TokenRejected";
-        private const string TENANT_KEY = "Virtuademy_EditorLogin_Tenant";
-        private const string USERNAME_KEY = "Virtuademy_EditorLogin_Username";
-        private const string IS_TENANT_MANAGER_KEY = "Virtuademy_EditorLogin_IsTenantManager";
-        private const string LOGGED_IN_APP_KEY = "Virtuademy_EditorLogin_App";
-        private const string LOGGED_IN_ENV_KEY = "Virtuademy_EditorLogin_Env";
-        private const string AUTH_CLIENT_ID_KEY = "Virtuademy_EditorLogin_AuthClientId";
-        private const string AUTH_CONFIG_KEY = "Virtuademy_EditorLogin_AuthConfig";
-
         /// <summary>
         /// How long before the real expiry a token is already treated as stale. A single deploy
         /// step (zip upload, DLL verification) can take a while between the check and the request
@@ -38,207 +25,72 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// </summary>
         public static readonly TimeSpan ExpiryMargin = TimeSpan.FromMinutes(2);
 
-        // Helper methods to read/write with EditorPrefs as persistent backing store
-        private static string GetString(string key, string defaultValue = "")
-        {
-            string value = SessionState.GetString(key, "");
-            if (string.IsNullOrEmpty(value))
-            {
-                value = EditorPrefs.GetString(key, defaultValue);
-                if (!string.IsNullOrEmpty(value))
-                    SessionState.SetString(key, value);
-            }
-            return value;
-        }
+        /// <summary>The key of the connection this view reads, or null when the project has none.</summary>
+        public static string ActiveConnectionKey => ProjectConnections.ActiveKey;
 
-        private static void SetString(string key, string value)
-        {
-            SessionState.SetString(key, value);
-            EditorPrefs.SetString(key, value);
-        }
+        private static ConnectionRecord Active => ConnectionStore.Get(ProjectConnections.ActiveKey);
 
-        private static bool GetBool(string key, bool defaultValue = false)
-        {
-            // SessionState doesn't distinguish "not set" from "false", so check EditorPrefs first on cold start
-            string marker = SessionState.GetString(key + "_set", "");
-            if (string.IsNullOrEmpty(marker))
-            {
-                bool value = EditorPrefs.GetBool(key, defaultValue);
-                SessionState.SetBool(key, value);
-                SessionState.SetString(key + "_set", "1");
-                return value;
-            }
-            return SessionState.GetBool(key, defaultValue);
-        }
+        public static string BearerToken => Active?.Token ?? "";
 
-        private static void SetBool(string key, bool value)
-        {
-            SessionState.SetBool(key, value);
-            SessionState.SetString(key + "_set", "1");
-            EditorPrefs.SetBool(key, value);
-        }
+        public static Tenant CurrentTenant => Active?.Tenant;
 
-        public static string BearerToken
-        {
-            get => GetString(TOKEN_KEY);
-            private set => SetString(TOKEN_KEY, value);
-        }
+        public static string Username => Active?.Username ?? "";
 
-        public static Tenant CurrentTenant
-        {
-            get
-            {
-                string json = GetString(TENANT_KEY);
-                if (string.IsNullOrEmpty(json)) return null;
-                try
-                {
-                    return JsonConvert.DeserializeObject<Tenant>(json);
-                }
-                catch
-                {
-                    return null;
-                }
-            }
-            private set
-            {
-                SetString(TENANT_KEY, value != null ? JsonConvert.SerializeObject(value) : "");
-            }
-        }
+        public static bool IsTenantManager => Active?.IsTenantManager ?? false;
 
-        public static string Username
-        {
-            get => GetString(USERNAME_KEY);
-            private set => SetString(USERNAME_KEY, value ?? "");
-        }
+        /// <summary>The app name of the configuration file the connection was made from.</summary>
+        public static string LoggedInApp => Active?.App ?? "";
 
-        public static bool IsTenantManager
-        {
-            get => GetBool(IS_TENANT_MANAGER_KEY);
-            private set => SetBool(IS_TENANT_MANAGER_KEY, value);
-        }
-
-        public static string LoggedInApp
-        {
-            get => GetString(LOGGED_IN_APP_KEY);
-            private set => SetString(LOGGED_IN_APP_KEY, value ?? "");
-        }
-
-        public static string LoggedInEnv
-        {
-            get => GetString(LOGGED_IN_ENV_KEY);
-            private set => SetString(LOGGED_IN_ENV_KEY, value ?? "");
-        }
+        /// <summary>The environment key of that file.</summary>
+        public static string LoggedInEnv => Active?.Env ?? "";
 
         /// <summary>
         /// Azure client id (the app registration) the session was obtained with. Needed to
-        /// rebuild the MSAL client when renewing the token after a domain reload.
+        /// rebuild the MSAL client when renewing the token.
         /// </summary>
-        public static string AuthClientId
-        {
-            get => GetString(AUTH_CLIENT_ID_KEY);
-            private set => SetString(AUTH_CLIENT_ID_KEY, value ?? "");
-        }
+        public static string AuthClientId => Active?.AuthClientId ?? "";
 
         /// <summary>
         /// The auth config as resolved at login time. Stored rather than re-read from the tenant
         /// because login falls back to the legacy app custom config when the tenant has no
         /// authConfig yet: a renewal must use whatever actually worked.
         /// </summary>
-        public static AzureB2CConfig AuthConfig
-        {
-            get
-            {
-                string json = GetString(AUTH_CONFIG_KEY);
-                if (string.IsNullOrEmpty(json)) return null;
-                try
-                {
-                    return JsonConvert.DeserializeObject<AzureB2CConfig>(json);
-                }
-                catch
-                {
-                    return null;
-                }
-            }
-            private set
-            {
-                SetString(AUTH_CONFIG_KEY, value != null ? JsonConvert.SerializeObject(value) : "");
-            }
-        }
+        public static AzureB2CConfig AuthConfig => Active?.AuthConfig;
 
         /// <summary>
         /// When the current token stops being accepted, or null if it could not be determined.
         /// </summary>
-        public static DateTime? TokenExpiryUtc
-        {
-            get
-            {
-                // The claim inside the token wins over the stored value: see JwtBearerInspector.
-                if (JwtBearerInspector.TryGetExpiry(BearerToken, out DateTime fromClaim))
-                    return fromClaim;
-
-                string stored = GetString(TOKEN_EXPIRY_KEY);
-                if (!string.IsNullOrEmpty(stored)
-                    && DateTime.TryParse(stored, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime parsed))
-                {
-                    return parsed.ToUniversalTime();
-                }
-
-                return null;
-            }
-        }
+        public static DateTime? TokenExpiryUtc => Active?.ExpiryUtc;
 
         /// <summary>
         /// The moment <see cref="IsTokenValid"/> turns false on its own: the expiry minus
         /// <see cref="ExpiryMargin"/>. Status labels show this one rather than the expiry, so the
         /// time they announce is the time they change. Null when the expiry is unknown.
         /// </summary>
-        public static DateTime? TokenUsableUntilUtc => TokenExpiryUtc - ExpiryMargin;
+        public static DateTime? TokenUsableUntilUtc => Active?.UsableUntilUtc;
 
         /// <summary>
         /// True when the server answered 401 to the current token before its expiry.
         /// </summary>
-        public static bool IsTokenRejected => GetString(TOKEN_REJECTED_KEY) == "1";
+        public static bool IsTokenRejected => Active?.TokenRejected ?? false;
 
         /// <summary>
         /// True when a login happened at some point, regardless of whether the token is still
         /// good. A session that only needs renewing is still a session.
         /// </summary>
-        public static bool HasSession => !string.IsNullOrEmpty(BearerToken);
+        public static bool HasSession => Active?.HasSession ?? false;
 
         /// <summary>
         /// True when the stored token can still be used: present, not rejected by the server,
         /// and not within <see cref="ExpiryMargin"/> of its expiry.
         /// </summary>
-        public static bool IsTokenValid
-        {
-            get
-            {
-                if (!HasSession)
-                    return false;
-
-                if (IsTokenRejected)
-                    return false;
-
-                DateTime? expiry = TokenExpiryUtc;
-                if (expiry == null)
-                {
-                    // Unknown expiry — assume usable and let the 401 retry catch it.
-                    return true;
-                }
-
-                return DateTime.UtcNow + ExpiryMargin < expiry.Value;
-            }
-        }
+        public static bool IsTokenValid => Active?.IsTokenValid ?? false;
 
         /// <summary>
         /// True when the token can be renewed without a fresh interactive login being the only
         /// option: everything the renewal needs was stored at login time.
         /// </summary>
-        public static bool CanRenewSession =>
-            HasSession
-            && CurrentTenant?.Config != null
-            && AuthConfig != null
-            && !string.IsNullOrEmpty(AuthClientId);
+        public static bool CanRenewSession => Active?.CanRenew ?? false;
 
         /// <summary>
         /// A login is on record. This stays true while the token is merely expired, because every
@@ -248,16 +100,19 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         public static bool IsLoggedIn => HasSession;
 
         /// <summary>
-        /// Checks whether the given app/env pair matches the currently logged-in tenant.
+        /// Checks whether the given app/env pair is the one the active connection was made from and is logged in.
         /// </summary>
         public static bool IsLoggedInto(string app, string env)
         {
-            return IsLoggedIn
-                && !string.IsNullOrEmpty(LoggedInApp)
-                && LoggedInApp == app
-                && LoggedInEnv == env;
+            ConnectionRecord active = Active;
+            return active != null
+                && active.HasSession
+                && !string.IsNullOrEmpty(active.App)
+                && active.App == app
+                && active.Env == env;
         }
 
+        /// <summary>The user logged in or out, or the project's active connection changed.</summary>
         public static event Action OnLoginStateChanged;
 
         /// <summary>
@@ -268,77 +123,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// </summary>
         public static event Action OnTokenChanged;
 
-        public static void Set(string token, DateTime? tokenExpiryUtc, Tenant tenant, string username,
-                               bool isTenantManager = false, string app = null, string env = null,
-                               string authClientId = null, AzureB2CConfig authConfig = null)
-        {
-            BearerToken = token;
-            SetExpiry(tokenExpiryUtc);
-            CurrentTenant = tenant;
-            Username = username;
-            IsTenantManager = isTenantManager;
-            LoggedInApp = app;
-            LoggedInEnv = env;
-            AuthClientId = authClientId;
-            AuthConfig = authConfig;
-            OnLoginStateChanged?.Invoke();
-        }
+        internal static void NotifyLoginChanged() => OnLoginStateChanged?.Invoke();
 
-        /// <summary>
-        /// Replaces just the token after a renewal, leaving tenant, role and app/env untouched.
-        /// A null or empty <paramref name="username"/> keeps the stored one.
-        ///
-        /// Deliberately does NOT raise <see cref="OnLoginStateChanged"/>: subscribers rebuild
-        /// their UI and reload data on that event, and a token rotation happens *inside* their own
-        /// API calls. Firing it here would re-enter them mid-request. Who the user is logged in as
-        /// has not changed — only the token behind it, which <see cref="OnTokenChanged"/> reports.
-        /// </summary>
-        public static void UpdateToken(string token, DateTime? tokenExpiryUtc, string username = null)
-        {
-            BearerToken = token;
-            SetExpiry(tokenExpiryUtc);
-
-            if (!string.IsNullOrEmpty(username))
-                Username = username;
-
-            OnTokenChanged?.Invoke();
-        }
-
-        /// <summary>
-        /// Marks the token unusable without dropping the session, so the next authenticated call
-        /// renews it. Called when the server answers 401 to a token we believed still valid
-        /// (revoked, rotated, or clock skew between us and the API).
-        /// Raises <see cref="OnTokenChanged"/> only, for the same reason as <see cref="UpdateToken"/>.
-        /// </summary>
-        public static void MarkTokenExpired()
-        {
-            SetString(TOKEN_REJECTED_KEY, "1");
-            OnTokenChanged?.Invoke();
-        }
-
-        public static void Clear()
-        {
-            BearerToken = "";
-            SetString(TOKEN_EXPIRY_KEY, "");
-            SetString(TOKEN_REJECTED_KEY, "");
-            CurrentTenant = null;
-            Username = "";
-            IsTenantManager = false;
-            LoggedInApp = "";
-            LoggedInEnv = "";
-            AuthClientId = "";
-            AuthConfig = null;
-            OnLoginStateChanged?.Invoke();
-        }
-
-        private static void SetExpiry(DateTime? expiryUtc)
-        {
-            SetString(TOKEN_EXPIRY_KEY, expiryUtc.HasValue
-                ? expiryUtc.Value.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)
-                : "");
-
-            // A fresh token starts out accepted again.
-            SetString(TOKEN_REJECTED_KEY, "");
-        }
+        internal static void NotifyTokenChanged() => OnTokenChanged?.Invoke();
     }
 }

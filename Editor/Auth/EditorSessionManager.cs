@@ -1,30 +1,30 @@
-using Newtonsoft.Json;
-
 using Virtuademy.SDK.TenantConfiguration;
-using Virtuademy.SDK.Core.Utilities;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
+using Microsoft.Identity.Client;
+
 using UnityEditor;
 
 using UnityEngine;
 
-using SPACS.Utilities;
-
 namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
-    /// Owns the editor's authenticated session: acquires it, renews it before it expires, and
-    /// replays a request once when the server rejects a token we believed was still good.
+    /// Owns the editor's authenticated sessions: renews them before they expire, and replays a request once
+    /// when the server rejects a token we believed was still good. A session belongs to a connection of the
+    /// per-user <see cref="ConnectionStore"/>; every method has a form that names the connection, and the one
+    /// that does not uses the project's active connection (<see cref="ProjectConnections.ActiveKey"/>).
     ///
     /// Every editor tool that calls a Virtuademy API must go through
-    /// <see cref="SendAuthorizedAsync"/> (or at least await <see cref="EnsureValidTokenAsync"/>
-    /// immediately before each request). Reading <c>EditorLoginState.BearerToken</c> once and
+    /// <see cref="SendAuthorizedAsync(Func{HttpRequestMessage}, HttpClient, bool)"/> (or at least await
+    /// <see cref="EnsureValidTokenAsync(bool)"/> immediately before each request). Reading the token once and
     /// reusing it across a long operation is exactly the bug this class exists to prevent: a
     /// build-and-deploy runs for minutes, and the token can die halfway through it.
     /// </summary>
@@ -32,63 +32,77 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     {
         private static readonly HttpClient httpClient = new();
 
+        // One renewal per connection at a time in this process; across processes, the store's renewal lock.
         private static readonly object renewalLock = new();
-        private static Task<bool> renewalInFlight;
+        private static readonly Dictionary<string, Task<bool>> renewalsInFlight = new();
 
         // Read once, on whichever thread first touches this class (the main one in practice):
         // Application.isBatchMode is an engine call and the renewal below may run elsewhere.
         private static readonly bool runsInBatchMode = Application.isBatchMode;
 
         /// <summary>
-        /// Whether the session may fall back to an interactive login (the system browser) when it
+        /// Whether a session may fall back to an interactive login (the system browser) when it
         /// cannot be renewed silently. False in batch mode: nobody is there to answer the browser,
         /// so the editor would sit waiting for a login that cannot happen. Every
         /// <c>allowInteractive</c> argument below is read through it, so no caller has to remember.
+        /// The <c>login</c> command line is the exception that proves it: it is asked for the browser, by name
+        /// (<see cref="ConnectionLoginService.LoginAsync(string, LoginOptions)"/>), and says where to find it.
         /// </summary>
         public static bool InteractiveLoginAllowed => !runsInBatchMode;
 
-        // Suffix appended to the tenant label to form the Application API token label
-        // (tenant "Simbi" -> "SimbiApplication"). Same convention as
-        // AuthenticationBridge.ManageTokens in the WebGL bridge — the match rule is
-        // in FetchTenantTokenAsync.
-        private const string applicationApiLabelSuffix = "Application";
+        /// <summary>
+        /// Guarantees a usable token for the project's active connection, renewing it if needed.
+        /// </summary>
+        public static Task<bool> EnsureValidTokenAsync(bool allowInteractive = true) =>
+            EnsureValidTokenAsync(ProjectConnections.ActiveKey, allowInteractive);
 
         /// <summary>
-        /// Guarantees a usable token, renewing it if needed. Renewal is silent whenever the MSAL
-        /// cache still holds a refresh token; otherwise it falls back to an interactive login when
-        /// <paramref name="allowInteractive"/> allows it — and never in batch mode
+        /// Guarantees a usable token for the connection, renewing it if needed. Renewal is silent whenever the
+        /// MSAL cache still holds a refresh token for the connection's account; otherwise it falls back to an
+        /// interactive login when <paramref name="allowInteractive"/> allows it — and never in batch mode
         /// (<see cref="InteractiveLoginAllowed"/>).
         ///
         /// Concurrent callers share a single renewal — N parallel requests finding the same
-        /// expired token must not trigger N logins.
+        /// expired token must not trigger N logins — and so do processes (the store's renewal lock): one renews,
+        /// the others read what it stored.
         /// </summary>
         /// <returns>False when there is no session at all, or the renewal failed. The caller must
         /// abort: no request made with the current token can succeed.</returns>
-        public static Task<bool> EnsureValidTokenAsync(bool allowInteractive = true)
+        public static Task<bool> EnsureValidTokenAsync(string connectionKey, bool allowInteractive = true)
         {
             allowInteractive &= InteractiveLoginAllowed;
 
-            if (!EditorLoginState.HasSession)
+            ConnectionRecord record = ConnectionStore.Get(connectionKey);
+            if (record == null || !record.HasSession)
             {
                 Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Virtuademy / Available Tenants'.");
                 return Task.FromResult(false);
             }
 
-            if (EditorLoginState.IsTokenValid)
+            if (record.IsTokenValid)
                 return Task.FromResult(true);
 
             lock (renewalLock)
             {
-                if (renewalInFlight != null && !renewalInFlight.IsCompleted)
-                    return renewalInFlight;
+                if (renewalsInFlight.TryGetValue(record.Key, out Task<bool> running) && !running.IsCompleted)
+                    return running;
 
-                renewalInFlight = RenewSessionAsync(allowInteractive);
-                return renewalInFlight;
+                Task<bool> renewal = RenewSessionAsync(record.Key, allowInteractive);
+                renewalsInFlight[record.Key] = renewal;
+                return renewal;
             }
         }
 
         /// <summary>
-        /// Sends an authenticated request, attaching a freshly validated token.
+        /// Sends an authenticated request on the project's active connection.
+        /// </summary>
+        public static Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory,
+                                                                    HttpClient client = null,
+                                                                    bool allowInteractive = true) =>
+            SendAuthorizedAsync(ProjectConnections.ActiveKey, requestFactory, client, allowInteractive);
+
+        /// <summary>
+        /// Sends an authenticated request on a connection, attaching a freshly validated token.
         ///
         /// The request is built by <paramref name="requestFactory"/> rather than passed in
         /// because an <see cref="HttpRequestMessage"/> cannot be sent twice: the 401 retry needs
@@ -96,19 +110,20 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// </summary>
         /// <returns>The response, or null when the session could not be established — which is
         /// not the same as a failed request and callers should report it as such.</returns>
-        public static async Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory,
+        public static async Task<HttpResponseMessage> SendAuthorizedAsync(string connectionKey,
+                                                                         Func<HttpRequestMessage> requestFactory,
                                                                          HttpClient client = null,
                                                                          bool allowInteractive = true)
         {
             if (requestFactory == null)
                 throw new ArgumentNullException(nameof(requestFactory));
 
-            if (!await EnsureValidTokenAsync(allowInteractive))
+            if (!await EnsureValidTokenAsync(connectionKey, allowInteractive))
                 return null;
 
             HttpClient targetClient = client ?? httpClient;
 
-            HttpResponseMessage response = await SendOnceAsync(requestFactory, targetClient);
+            HttpResponseMessage response = await SendOnceAsync(connectionKey, requestFactory, targetClient);
 
             if (response.StatusCode != HttpStatusCode.Unauthorized)
                 return response;
@@ -117,61 +132,24 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             // rotated, or our clock disagrees with the API's. Renew once and replay.
             Debug.LogWarning("[EditorSessionManager] Request rejected with 401 — renewing the session and retrying once.");
             response.Dispose();
-            EditorLoginState.MarkTokenExpired();
+            await MarkTokenRejectedAsync(connectionKey);
 
-            if (!await EnsureValidTokenAsync(allowInteractive))
+            if (!await EnsureValidTokenAsync(connectionKey, allowInteractive))
                 return null;
 
-            return await SendOnceAsync(requestFactory, targetClient);
+            return await SendOnceAsync(connectionKey, requestFactory, targetClient);
         }
 
         /// <summary>
-        /// Completes a login for an already-resolved tenant and auth config: acquires the Azure
-        /// token, exchanges it for the tenant's Virtuademy token, reads the role and stores the
-        /// session together with everything a later renewal needs.
+        /// Ends the project's active connection's session on both sides: the stored token and the MSAL refresh
+        /// token (which stays when another connection uses the same account).
         /// </summary>
-        public static async Task<bool> LoginAsync(Tenant tenant, AzureB2CConfig authConfig, string clientId,
-                                                  string app, string env)
+        public static async Task LogoutAsync() => await LogoutAsync(ProjectConnections.ActiveKey);
+
+        public static async Task LogoutAsync(string connectionKey)
         {
-            if (tenant?.Config == null)
-                throw new ArgumentException("Tenant configuration is missing.", nameof(tenant));
-            if (authConfig == null)
-                throw new ArgumentNullException(nameof(authConfig));
-            if (string.IsNullOrEmpty(clientId))
-                throw new ArgumentException("Client id is missing.", nameof(clientId));
-
-            InitAuthService(clientId, authConfig);
-            string[] scopes = AzureAuthService.BuildScopes(authConfig);
-
-            (string accessToken, string username) = await AzureAuthService.LoginInteractive(scopes);
-            if (string.IsNullOrEmpty(accessToken))
-            {
-                Debug.LogError("[EditorSessionManager] Login failed: Azure returned no access token.");
-                return false;
-            }
-
-            JwtToken apiToken = await FetchTenantTokenAsync(tenant, accessToken);
-            if (apiToken == null)
-                return false;
-
-            bool isTenantManager = await CheckTenantManagerAsync(tenant, apiToken.Bearer);
-
-            EditorLoginState.Set(apiToken.Bearer, apiToken.Expiry, tenant, username,
-                                 isTenantManager, app, env, clientId, authConfig);
-
-            Debug.Log($"[EditorSessionManager] Login successful for tenant: {tenant.Label}, user: {username}, " +
-                      $"isTenantManager: {isTenantManager}, token expires at {DescribeExpiry()}.");
-            return true;
-        }
-
-        /// <summary>
-        /// Ends the session on both sides: the stored token and the MSAL refresh token.
-        /// </summary>
-        public static async Task LogoutAsync()
-        {
-            await AzureAuthService.SignOutAsync();
-            EditorLoginState.Clear();
-            Debug.Log("[EditorSessionManager] Logged out.");
+            if (!await ConnectionLoginService.LogoutAsync(connectionKey))
+                Debug.Log("[EditorSessionManager] There was no session to end.");
         }
 
         /// <summary>
@@ -208,162 +186,129 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             return $" - session expired at {time}, it will be renewed automatically on the next operation";
         }
 
-        private static async Task<HttpResponseMessage> SendOnceAsync(Func<HttpRequestMessage> requestFactory, HttpClient client)
+        private static async Task<HttpResponseMessage> SendOnceAsync(string connectionKey, Func<HttpRequestMessage> requestFactory, HttpClient client)
         {
+            ConnectionRecord record = ConnectionStore.Get(connectionKey);
             using HttpRequestMessage request = requestFactory();
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", EditorLoginState.BearerToken);
+
+            // A token goes only to the hosts of the tenant of the connection it belongs to: a caller that took its
+            // address from another connection (the project's active one changed under it) is stopped here.
+            RequireHostOf(record, request.RequestUri, connectionKey);
+
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", record?.Token);
             return await client.SendAsync(request);
         }
 
-        private static async Task<bool> RenewSessionAsync(bool allowInteractive)
+        private static void RequireHostOf(ConnectionRecord record, Uri uri, string connectionKey)
         {
-            Tenant tenant = EditorLoginState.CurrentTenant;
-            AzureB2CConfig authConfig = EditorLoginState.AuthConfig;
-            string clientId = EditorLoginState.AuthClientId;
+            TenantConfig config = record?.Tenant?.Config;
+            string[] own = { config?.ApplicationApiUrl, config?.ProfileApiUrl, config?.RealtimeApiUrl, config?.AIApiUrl };
 
-            if (!EditorLoginState.CanRenewSession)
+            bool belongs = uri != null && uri.IsAbsoluteUri && own.Any(url =>
+                Uri.TryCreate(url, UriKind.Absolute, out Uri host) && string.Equals(host.Authority, uri.Authority, StringComparison.OrdinalIgnoreCase));
+
+            if (!belongs)
             {
-                // Sessions stored before the auth config was persisted cannot be renewed: the
-                // client id and policy needed to talk to Azure were never written down.
-                Debug.LogError("[EditorSessionManager] The stored session cannot be renewed automatically " +
-                               "(it predates automatic token refresh). Log in again via 'Virtuademy / Available Tenants'.");
+                throw new InvalidOperationException(
+                    $"The request to {uri?.GetLeftPart(UriPartial.Authority) ?? "(no address)"} was not sent: it is not an address of the tenant of connection '{connectionKey}', " +
+                    "and that connection's token goes nowhere else.");
+            }
+        }
+
+        /// <summary>
+        /// Marks the token unusable without dropping the session, so the next authenticated call
+        /// renews it. Raises <see cref="EditorLoginState.OnTokenChanged"/> only.
+        /// </summary>
+        private static async Task MarkTokenRejectedAsync(string connectionKey)
+        {
+            await ConnectionStore.UpdateAsync(connectionKey, r =>
+            {
+                if (r != null)
+                    r.TokenRejected = true;
+                return r;
+            });
+
+            EditorLoginState.NotifyTokenChanged();
+        }
+
+        private static async Task<bool> RenewSessionAsync(string key, bool allowInteractive)
+        {
+            ConnectionRecord record = ConnectionStore.Get(key);
+            if (record == null)
+                return false;
+
+            if (!record.CanRenew)
+            {
+                // The auth config and client id needed to talk to Azure were never written down.
+                Debug.LogError("[EditorSessionManager] The stored session cannot be renewed automatically. " +
+                               "Log in again via 'Virtuademy / Available Tenants'.");
                 return false;
             }
 
-            InitAuthService(clientId, authConfig);
-            string[] scopes = AzureAuthService.BuildScopes(authConfig);
+            long seenRevision = record.Revision;
+            IPublicClientApplication client = AzureAuthService.GetClient(record.AuthClientId, record.AuthConfig);
+            string[] scopes = AzureAuthService.BuildScopes(record.AuthConfig);
+            AzureTokenResult azure = null;
 
-            (string accessToken, string username) = await AzureAuthService.TryAcquireTokenSilent(scopes);
-
-            if (string.IsNullOrEmpty(accessToken))
+            // One process renews, the others read the result. The lock covers the silent call only: a person at
+            // a browser takes minutes, and everybody else would wait for them.
+            using (IDisposable renewal = await ConnectionStore.LockRenewalAsync(key, 60000))
             {
-                if (!allowInteractive)
+                ConnectionRecord now = ConnectionStore.Get(key);
+                if (now != null && now.Revision != seenRevision && now.IsTokenValid)
                 {
-                    Debug.LogError("[EditorSessionManager] The session expired and could not be renewed silently.");
-                    return false;
+                    Debug.Log($"[EditorSessionManager] Another process renewed the session of {now.TenantLabel}; using it.");
+                    EditorLoginState.NotifyTokenChanged();
+                    return true;
                 }
 
-                // An interactive login opens the system browser. A modal progress bar left up by
-                // the operation that triggered this would sit on top of it, unclosable.
-                EditorUtility.ClearProgressBar();
-                Debug.Log("[EditorSessionManager] The session expired and cannot be renewed silently — asking for a new login.");
+                record = now ?? record;
+                azure = await AzureAuthService.TryAcquireTokenSilent(client, scopes, record.AccountId);
 
-                try
-                {
-                    (accessToken, username) = await AzureAuthService.LoginInteractive(scopes);
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"[EditorSessionManager] Interactive re-login failed: {ex.Message}");
-                    return false;
-                }
-
-                if (string.IsNullOrEmpty(accessToken))
-                {
-                    Debug.LogError("[EditorSessionManager] Interactive re-login returned no access token.");
-                    return false;
-                }
+                if (azure != null)
+                    return await StoreRenewalAsync(key, record, azure);
             }
 
-            JwtToken apiToken = await FetchTenantTokenAsync(tenant, accessToken);
-            if (apiToken == null)
+            if (!allowInteractive)
+            {
+                Debug.LogError("[EditorSessionManager] The session expired and could not be renewed silently.");
+                return false;
+            }
+
+            // An interactive login opens the system browser. A modal progress bar left up by
+            // the operation that triggered this would sit on top of it, unclosable.
+            EditorUtility.ClearProgressBar();
+            Debug.Log("[EditorSessionManager] The session expired and cannot be renewed silently — asking for a new login.");
+
+            try
+            {
+                azure = await AzureAuthService.LoginInteractive(client, scopes, record.AccountId, new InteractiveLoginOptions());
+            }
+            catch (Exception ex) when (ex is LoginTimeoutException || ex is LoginAccountMismatchException || ex is MsalException || ex is OperationCanceledException)
+            {
+                Debug.LogError($"[EditorSessionManager] Interactive re-login failed: {ex.Message}");
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(azure?.AccessToken))
+            {
+                Debug.LogError("[EditorSessionManager] Interactive re-login returned no access token.");
+                return false;
+            }
+
+            return await StoreRenewalAsync(key, record, azure);
+        }
+
+        private static async Task<bool> StoreRenewalAsync(string key, ConnectionRecord record, AzureTokenResult azure)
+        {
+            ConnectionRecord stored = await ConnectionLoginService.ExchangeAndStoreAsync(key, azure, checkTenantManager: false);
+            if (stored == null)
                 return false;
 
-            EditorLoginState.UpdateToken(apiToken.Bearer, apiToken.Expiry, username);
-            Debug.Log($"[EditorSessionManager] Session renewed for tenant {tenant.Label}, token expires at {DescribeExpiry()}.");
+            EditorLoginState.NotifyTokenChanged();
+            Debug.Log($"[EditorSessionManager] Session renewed for tenant {record.TenantLabel}, token expires at " +
+                      $"{stored.ExpiryUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "unknown"}.");
             return true;
-        }
-
-        private static void InitAuthService(string clientId, AzureB2CConfig authConfig)
-        {
-            if (authConfig.IsEntraId)
-                AzureAuthService.InitEntraId(clientId, authConfig.Tenant, authConfig.RedirectUri);
-            else
-                AzureAuthService.Init(clientId, authConfig.Tenant, authConfig.Policy, authConfig.RedirectUri);
-        }
-
-        /// <summary>
-        /// Exchanges an Azure access token for the Virtuademy token of this tenant's API label.
-        /// </summary>
-        private static async Task<JwtToken> FetchTenantTokenAsync(Tenant tenant, string accessToken)
-        {
-            string tokensJson;
-            try
-            {
-                tokensJson = await AzureAuthService.GetUserDataAsync(tenant.Config.ProfileApiUrl, accessToken);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[EditorSessionManager] Failed to call the profile API: {ex.Message}");
-                return null;
-            }
-
-            if (string.IsNullOrEmpty(tokensJson))
-            {
-                Debug.LogError("[EditorSessionManager] The profile API returned no tokens.");
-                return null;
-            }
-
-            JwtToken[] tokens;
-            try
-            {
-                tokens = JsonConvert.DeserializeObject<JwtToken[]>(tokensJson);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[EditorSessionManager] Could not parse the profile API tokens: {ex.Message}");
-                return null;
-            }
-
-            tokens ??= Array.Empty<JwtToken>();
-
-            // Tenants provisioned under the current convention label the Application API
-            // "<TenantLabel>Application", mirroring the AI/Realtime scheme ("SimbiAI",
-            // "SimbiRealtime"). Match the suffixed label first, then fall back to the bare tenant
-            // label for tenants provisioned before it (e.g. Marangoni).
-            // TODO: drop the legacy bare-label fallback once every tenant carries the suffix.
-            string apiLabel = tenant.Label + applicationApiLabelSuffix;
-            JwtToken matchingToken = tokens.FirstOrDefault(t => t.ApiLabel == apiLabel)
-                                     ?? tokens.FirstOrDefault(t => t.ApiLabel == tenant.Label);
-            if (matchingToken == null)
-            {
-                // Listing what came back separates "no token was minted at all" — an empty list
-                // means the profile is not Enabled, or the app's role definition does not request
-                // the API — from "minted under a label we do not match".
-                string received = tokens.Length == 0
-                                  ? "<none>"
-                                  : string.Join(", ", tokens.Select(t => t.ApiLabel));
-                Debug.LogError($"[EditorSessionManager] No token found for API label: {apiLabel} " +
-                               $"(or {tenant.Label}). Received: {received}");
-            }
-
-            return matchingToken;
-        }
-
-        /// <summary>
-        /// The endpoint answers 200 only to tenant managers, so its status is the role check.
-        /// A network failure is reported as "not a tenant manager": the UI it gates is additive.
-        /// </summary>
-        private static async Task<bool> CheckTenantManagerAsync(Tenant tenant, string bearer)
-        {
-            string applicationApiUrl = tenant.Config.ApplicationApiUrl;
-            if (string.IsNullOrEmpty(applicationApiUrl))
-                return false;
-
-            try
-            {
-                using HttpRequestMessage request = new(HttpMethod.Get,
-                    $"{applicationApiUrl}/tenants/app/Unity/permissions/my?api-version=2");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
-
-                using HttpResponseMessage response = await httpClient.SendAsync(request);
-                return response.IsSuccessStatusCode;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[EditorSessionManager] Could not check the TenantManager role: {ex.Message}");
-                return false;
-            }
         }
     }
 }
