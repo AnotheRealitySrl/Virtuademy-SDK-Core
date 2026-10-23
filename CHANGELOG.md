@@ -3,7 +3,7 @@
 ## Unreleased
 
 Minor bump: additive API, plus behaviour changes an external app will notice (listed under
-Changed). The editor login API changes shape (ADR 0037, platform 2026.6.2): the members that went are named
+Changed). The editor login API changes shape (ADR 0037, platform 2026.7.0): the members that went are named
 under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 
 ### Added
