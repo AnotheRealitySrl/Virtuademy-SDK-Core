@@ -113,6 +113,9 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
   (its login, worlds and ticks): the window refreshed only itself. It now raises `EditorLoginState.OnLoginStateChanged`,
   which every window that shows the active connection listens to. A deploy started there was already refused, because the
   connection had changed since its worlds were listed.
+- **The session label showed the time without the date** ("session until 12:20" for a session that ends in a week), so a
+  valid session read as one about to expire. The labels and the login and renewal logs now add the day and month when
+  the moment is not today ("session until 2 Nov 12:20"; `EditorSessionManager.FormatLocal`).
 
 ## v0.3.0
 

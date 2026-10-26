@@ -683,7 +683,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         private static string Describe(DateTime? expiry) =>
-            expiry == null ? "unknown" : expiry.Value.ToLocalTime().ToString("HH:mm:ss");
+            EditorSessionManager.FormatLocal(expiry, seconds: true);
 
         #endregion
     }

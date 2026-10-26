@@ -2,6 +2,7 @@ using Virtuademy.SDK.TenantConfiguration;
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -161,7 +162,21 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             if (expiry == null)
                 return "unknown";
 
-            return expiry.Value.ToLocalTime().ToString("HH:mm:ss");
+            return FormatLocal(expiry, seconds: true);
+        }
+
+        /// <summary>
+        /// A UTC moment as the labels and logs show it, in local time: the time alone when it falls today, the day and
+        /// month too otherwise, so a session that lasts a week does not read as one that ends today.
+        /// </summary>
+        internal static string FormatLocal(DateTime? utc, bool seconds = false)
+        {
+            if (utc == null)
+                return "unknown";
+
+            DateTime local = utc.Value.ToLocalTime();
+            string time = local.ToString(seconds ? "HH:mm:ss" : "HH:mm", CultureInfo.InvariantCulture);
+            return local.Date == DateTime.Now.Date ? time : local.ToString("d MMM ", CultureInfo.InvariantCulture) + time;
         }
 
         /// <summary>
@@ -175,7 +190,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         {
             tokenValid = EditorLoginState.IsTokenValid;
             DateTime? usableUntil = EditorLoginState.TokenUsableUntilUtc;
-            string time = usableUntil?.ToLocalTime().ToString("HH:mm") ?? "unknown";
+            string time = FormatLocal(usableUntil);
 
             if (tokenValid)
                 return $" (session until {time})";
@@ -307,7 +322,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             EditorLoginState.NotifyTokenChanged();
             Debug.Log($"[EditorSessionManager] Session renewed for tenant {record.TenantLabel}, token expires at " +
-                      $"{stored.ExpiryUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "unknown"}.");
+                      $"{FormatLocal(stored.ExpiryUtc, seconds: true)}.");
             return true;
         }
     }
