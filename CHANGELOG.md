@@ -124,7 +124,9 @@ resolve` does it. SDK-Environments v10.0.0, moved the same day, needs this commi
   "Connect the SDK to your tenant" does by hand: the file downloaded from the Back Office (**Download SDK
   Environments Config**) goes into the project (`Assets/Editor/TenantConfiguration`, the folder of the settings
   asset, unless it already is under `Assets/`), into the **App Assets** of the `AppConfigurationSettings` asset,
-  and is selected (its app, from the file name, and the file's first environment, or the one asked for). The file
+  and is selected (its app, from the file name, and the file's first environment, or the one asked for). The copy drops the
+  " (1)" a browser adds to a second download of the same file, so the app keeps the Back Office's name and a newer download
+  replaces the older one. The file
   is validated (an environment with an app id, a secret and an API base URL) and nothing of its content is logged
   or quoted in an error. **It holds the app's secret, so the importer refuses to put it where git would track
   it:** when the project is inside a git work tree it asks git (`git check-ignore`) about the destination (and the

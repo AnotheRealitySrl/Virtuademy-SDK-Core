@@ -18,7 +18,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// <remarks>
     /// There is no "current login" any more, only the connection an operation names. The one the project
     /// calls <see cref="ActiveKey"/> is what the window's login, the deploy and the other editor requests
-    /// that name no connection use: the last one logged into from this project, or the only one it uses.
+    /// that name no connection use: the one chosen in the window (a login there makes it active), or the first one this
+    /// project used. A login from the command line or a request file makes its connection active only when the
+    /// project has none (<see cref="Use"/>).
     /// The deploy targets, and the world ticks that used to live in one machine-wide EditorPrefs value, join
     /// this file in a later step.
     /// </remarks>

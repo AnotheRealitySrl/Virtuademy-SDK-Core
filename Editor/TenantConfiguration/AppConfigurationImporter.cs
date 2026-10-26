@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 using UnityEditor;
 
@@ -130,6 +131,10 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 // A TextAsset needs a text extension: the app name comes from what precedes the first dot.
                 if (!fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && !fileName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
                     fileName += ".json";
+
+                // A browser saves a second download of the same file as "Name (1).json" (Firefox "Name(1).json"). The copy
+                // keeps the name the Back Office gave, so the app keeps its name and a newer download replaces the older one.
+                fileName = Regex.Replace(fileName, @"\s?\(\d+\)(?=\.[^.]+$)", "");
 
                 folder = (destinationFolder ?? DefaultFolder).Replace('\\', '/').Trim('/');
                 if (folder != "Assets" && !folder.StartsWith("Assets/", StringComparison.Ordinal))
