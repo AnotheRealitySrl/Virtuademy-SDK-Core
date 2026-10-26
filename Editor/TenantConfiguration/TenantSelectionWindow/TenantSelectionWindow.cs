@@ -441,7 +441,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 return;
 
             ProjectConnections.Use(stored.Key);
-            OnLoginStateChanged();
+            // Every window that shows the active connection (this one, the Addressables window) reloads, not only this one.
+            EditorLoginState.NotifyLoginChanged();
         }
 
         /// <summary>

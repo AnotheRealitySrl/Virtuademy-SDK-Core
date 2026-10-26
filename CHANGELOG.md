@@ -109,6 +109,10 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
   when a failed response's body was not JSON (the HTML page of a 502 from a proxy or gateway) or
   was `null`: the caller got an exception instead of a failed response. The body is now parsed
   safely and logged as an excerpt when it is not a problem-details object.
+- **Selecting another configuration in Available Tenants left the Addressables window on the previous connection**
+  (its login, worlds and ticks): the window refreshed only itself. It now raises `EditorLoginState.OnLoginStateChanged`,
+  which every window that shows the active connection listens to. A deploy started there was already refused, because the
+  connection had changed since its worlds were listed.
 
 ## v0.3.0
 
