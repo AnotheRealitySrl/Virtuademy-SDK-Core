@@ -1,5 +1,3 @@
-using Virtuademy.SDK.Core.ApiSystem;
-
 namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
@@ -13,41 +11,27 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// what makes that mismatch impossible to introduce by accident.
     /// </summary>
     /// <remarks>
-    /// Since 2026-09-08 it resolves through the **same generated asset the build reads**
-    /// (<see cref="PlatformConfig"/>, ADR 0025), falling back to the logged-in tenant's config.
-    /// That order is the point rather than a detail: an editor that resolved endpoints differently
-    /// from the player could publish an environment to one platform and have the world load
-    /// against another, and the two would have to disagree for a while before anybody noticed.
+    /// Every request takes its base URLs from the <b>connection it names</b> (ADR 0037): the addresses its
+    /// tenant reported when the connection logged in. The project's generated <c>PlatformEndpoints</c> asset
+    /// no longer decides where an editor request goes: it is what the <i>build</i> falls back to, and one
+    /// project's asset cannot be the answer for a connection that is not the project's play-mode tenant. A
+    /// token is sent to the host of the connection it belongs to, and to no other.
     /// <para>
-    /// The fallback stays because the asset needs a tenant switch to exist and the login state does
-    /// not — a freshly logged-in project with no generated asset still publishes, which is what
-    /// keeps this change from being a new precondition on the whole editor flow.
+    /// The members without a connection key mean the project's active connection
+    /// (<see cref="ProjectConnections.ActiveKey"/>), which keeps the existing deploy working until its targets
+    /// name their connections.
     /// </para>
     /// </remarks>
     public static class EditorApiEndpoint
     {
-        /// <summary>Canonical <c>cpi_type</c> values, as the platform reports them.</summary>
-        private const string application_api_type = "Application";
-
         /// <summary>
-        /// Base URL of the Application API, or null when neither the generated asset nor a login
-        /// can supply one — callers already treat that as "cannot reach the platform".
+        /// Base URL of the active connection's Application API, or null when the project has no connection or
+        /// its tenant reported none — callers already treat that as "cannot reach the platform".
         /// </summary>
-        public static string ApplicationApiUrl => Resolve(application_api_type,
-                                                          EditorLoginState.CurrentTenant?.Config?.ApplicationApiUrl);
+        public static string ApplicationApiUrl => ApplicationApiUrlOf(ProjectConnections.ActiveKey);
 
-        /// <summary>
-        /// The generated asset first, then the tenant the editor is logged into.
-        /// </summary>
-        private static string Resolve(string apiType, string tenantFallback)
-        {
-            if (PlatformConfig.TryGetEndpoint(apiType, out PlatformEndpoint endpoint)
-                && !string.IsNullOrEmpty(endpoint.BaseUrl))
-            {
-                return endpoint.BaseUrl;
-            }
-
-            return tenantFallback;
-        }
+        /// <summary>Base URL of the Application API of this connection's tenant.</summary>
+        public static string ApplicationApiUrlOf(string connectionKey) =>
+            ConnectionStore.Get(connectionKey)?.Tenant?.Config?.ApplicationApiUrl;
     }
 }

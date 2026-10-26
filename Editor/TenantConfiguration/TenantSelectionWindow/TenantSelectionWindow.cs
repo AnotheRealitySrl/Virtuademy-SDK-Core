@@ -1,6 +1,5 @@
 using Virtuademy.SDK.Core.ApiSystem;
 using Virtuademy.SDK.Core.Utilities;
-using Virtuademy.SDK.Http;
 
 using System;
 using System.Collections.Generic;
@@ -21,6 +20,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     public class TenantSelectionWindow : EditorWindow
     {
+        // Set once the project's configuration files were offered to the connection store in this editor session.
+        private const string credentials_imported_key = "Virtuademy_TenantSelection_CredentialsImported";
+
         [SerializeField] private VisualTreeAsset m_VisualTreeAsset = default;
         [SerializeField] private VisualTreeAsset appVisualTree = default;
         [SerializeField] private VisualTreeAsset envVisualTree = default;
@@ -170,6 +172,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             RefreshButtonsVisibility();
             UpdateLoginUI();
             UpdateMismatchWarning();
+
+            ImportProjectCredentials();
         }
 
         private void OnDestroy()
@@ -261,6 +265,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                             appConfigurationSettings.SelectedEnv = envConfig.Key;
                             appConfigurationSettings.SelectedApp = app.Item1;
 
+                            UseConnectionOfSelection();
                             RefreshButtonsVisibility();
                             UpdateMismatchWarning();
                         }
@@ -383,7 +388,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 && !string.IsNullOrEmpty(appConfigurationSettings.SelectedApp)
                 && !EditorLoginState.IsLoggedInto(appConfigurationSettings.SelectedApp, appConfigurationSettings.SelectedEnv))
             {
-                tenantMismatchLabel.text = $"Warning: you are logged into {EditorLoginState.LoggedInApp}/{EditorLoginState.LoggedInEnv}. Logging in here will switch your session.";
+                tenantMismatchLabel.text = $"Warning: this project's connection is {EditorLoginState.LoggedInApp}/{EditorLoginState.LoggedInEnv}. Logging in here adds a connection and makes it the project's; the other stays logged in.";
                 tenantMismatchLabel.style.display = DisplayStyle.Flex;
             }
             else
@@ -400,8 +405,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private async void OnLoginClicked()
         {
             AppIdentification selectedConfig = appConfigurationSettings.SelectedConfig;
-            string selectedApp = appConfigurationSettings.SelectedApp;
-            string selectedEnv = appConfigurationSettings.SelectedEnv;
 
             if (selectedConfig == null)
             {
@@ -409,84 +412,59 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 return;
             }
 
-            try
+            // Resolving the tenant and the auth config, the Azure login, the token exchange and the role check
+            // are ConnectionLoginService's: the command line runs the same steps. The login ends as a
+            // connection in the per-user store, and this project uses it from now on.
+            LoginOptions options = new()
             {
-                loginStatusLabel.text = "Fetching tenant data...";
+                MakeActive = true,   // a click in this window is the user's choice of connection
+                OnStatus = status => { if (loginStatusLabel != null) loginStatusLabel.text = status; },
+            };
 
-                // 1. Get tenant data
-                ApiResponse<Tenant> tenantResp = await TenantConfigurationClient.GetTenantData(selectedConfig);
-                if (!tenantResp.IsSuccess)
-                {
-                    Debug.LogError($"[TenantSelectionWindow] Failed to get tenant data: {tenantResp.ReasonPhrase}");
-                    loginStatusLabel.text = "Login failed (tenant data)";
-                    return;
-                }
+            LoginOutcome outcome = await ConnectionLoginService.LoginAsync(
+                selectedConfig, appConfigurationSettings.SelectedApp, appConfigurationSettings.SelectedEnv, options);
 
-                Tenant tenant = tenantResp.Content;
+            if (!outcome.Success && loginStatusLabel != null)
+                loginStatusLabel.text = outcome.Code == "login-timeout" ? "Login timed out" : "Login failed (see Console)";
+        }
 
-                // 2. Read auth config from tenant configuration
-                //    Falls back to legacy custom config if tenant authConfig is not populated yet
-                AzureB2CConfig b2cConfig = tenant.Config.AuthConfig;
-                if (b2cConfig == null)
-                {
-                    ApiResponse<Newtonsoft.Json.Linq.JObject> customConfigResp = await TenantConfigurationClient.GetAppCustomConfig(selectedConfig);
-                    if (customConfigResp.IsSuccess)
-                    {
-                        b2cConfig = AzureB2CConfig.FromAppCustomConfig(customConfigResp.Content);
-                    }
-                }
+        /// <summary>
+        /// Moves the project onto the stored connection of the config just selected, when there is one: its login
+        /// then shows, and the deploy and the other editor requests go to its tenant.
+        /// </summary>
+        private void UseConnectionOfSelection()
+        {
+            AppIdentification selected = appConfigurationSettings.SelectedConfig;
+            ConnectionRecord stored = selected?.Credential == null ? null : ConnectionStore.FindByAppId(selected.Credential.AppId);
 
-                if (b2cConfig == null)
-                {
-                    Debug.LogError("[TenantSelectionWindow] Failed to get auth config from tenant or custom config.");
-                    loginStatusLabel.text = "Login failed (auth config)";
-                    return;
-                }
+            if (stored == null || string.Equals(stored.Key, ProjectConnections.ActiveKey, StringComparison.OrdinalIgnoreCase))
+                return;
 
-                // 3. Validate config based on auth type
-                if (b2cConfig.IsEntraId)
-                {
-                    if (string.IsNullOrEmpty(b2cConfig.Tenant))
-                    {
-                        Debug.LogError($"[TenantSelectionWindow] Invalid Entra ID config — Tenant (tenant ID) is empty.");
-                        loginStatusLabel.text = "Login failed (Entra ID config invalid)";
-                        return;
-                    }
-                }
-                else if (b2cConfig.IsB2C)
-                {
-                    if (string.IsNullOrEmpty(b2cConfig.Tenant) || string.IsNullOrEmpty(b2cConfig.Policy))
-                    {
-                        Debug.LogError($"[TenantSelectionWindow] Invalid B2C config — Tenant: '{b2cConfig.Tenant}', Policy: '{b2cConfig.Policy}'.");
-                        loginStatusLabel.text = "Login failed (B2C config invalid)";
-                        return;
-                    }
-                }
-                else
-                {
-                    Debug.LogError($"[TenantSelectionWindow] Unrecognized auth policy: '{b2cConfig.Policy}'. Expected 'EntraID' or a value starting with 'B2C_'.");
-                    loginStatusLabel.text = "Login failed (unknown auth policy)";
-                    return;
-                }
+            ProjectConnections.Use(stored.Key);
+            // Every window that shows the active connection (this one, the Addressables window) reloads, not only this one.
+            EditorLoginState.NotifyLoginChanged();
+        }
 
-                // 4. clientId = AppIdentification.Credential.AppId
-                string clientId = selectedConfig.Credential.AppId.ToString();
+        /// <summary>
+        /// The old per-project credentials of this project go into the connection store, once per editor session
+        /// (ADR 0037, "Migration"). It asks the platform about each credential the store does not hold yet.
+        /// </summary>
+        private async void ImportProjectCredentials()
+        {
+            if (SessionState.GetBool(credentials_imported_key, false) || appConfigurationSettings == null)
+                return;
 
-                // 5. Azure login, token exchange, role check and session storage — including the
-                //    auth config, which the session manager needs to renew the token later on.
-                loginStatusLabel.text = "Logging in...";
+            SessionState.SetBool(credentials_imported_key, true);
 
-                if (!await EditorSessionManager.LoginAsync(tenant, b2cConfig, clientId, selectedApp, selectedEnv))
-                {
-                    loginStatusLabel.text = "Login failed (see Console)";
-                    return;
-                }
-            }
-            catch (Exception ex)
+            var (added, known, failures) = await ConnectionLoginService.ImportProjectCredentialsAsync(appConfigurationSettings);
+            if (added > 0 || failures.Count > 0)
             {
-                Debug.LogError($"[TenantSelectionWindow] Login error: {ex.Message}");
-                loginStatusLabel.text = "Login failed";
+                Debug.Log($"[TenantSelectionWindow] The project's configuration files: {added} connection(s) added to the store, {known} already there" +
+                          (failures.Count > 0 ? $", {failures.Count} not resolved: {string.Join("; ", failures)}." : ".") +
+                          " Each needs one login.");
             }
+
+            UseConnectionOfSelection();
         }
 
         #endregion

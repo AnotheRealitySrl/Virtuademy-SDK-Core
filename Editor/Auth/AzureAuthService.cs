@@ -3,121 +3,143 @@ using Microsoft.Identity.Client;
 
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
-using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
+    /// What an Azure login returned. The account id is the MSAL home account id a connection is pinned to;
+    /// it is not shown anywhere.
+    /// </summary>
+    public sealed class AzureTokenResult
+    {
+        public string AccessToken;
+
+        /// <summary>The display name from the ID token, or the account's username (typically the email).</summary>
+        public string Username;
+
+        public string AccountId;
+    }
+
+    /// <summary>How an interactive login behaves: where the URL goes and how long each phase may take.</summary>
+    public sealed class InteractiveLoginOptions
+    {
+        /// <summary>Called with the authorization URL as soon as MSAL has it. Anything that wants to show it does it here.</summary>
+        public Action<string> OnAuthUrl;
+
+        /// <summary>Open the system browser on the URL. Off for a caller that shows the URL to somebody else.</summary>
+        public bool OpenBrowser = true;
+
+        /// <summary>
+        /// How long MSAL may take to issue the URL. Its first HTTP call (the authority's metadata) sometimes
+        /// takes 15 to 20 seconds, and that wait is not the user's, so it has a budget of its own.
+        /// </summary>
+        public TimeSpan UrlBudget = TimeSpan.FromSeconds(60);
+
+        /// <summary>How long the user has, counted from the moment the URL is issued.</summary>
+        public TimeSpan UserBudget = TimeSpan.FromMinutes(3);
+    }
+
+    /// <summary>
+    /// The browser logged in as another account than the connection is pinned to (single sign-on in the browser can
+    /// answer with whoever is signed in there). A connection has one account: log out of it first to change it.
+    /// </summary>
+    public sealed class LoginAccountMismatchException : Exception
+    {
+        public LoginAccountMismatchException()
+            : base("The browser signed in as another account than the one this connection is pinned to. " +
+                   "Log out of the connection first if you mean to change its account.")
+        {
+        }
+    }
+
+    /// <summary>The interactive login ran out of time: <see cref="UrlIssued"/> says in which phase.</summary>
+    public sealed class LoginTimeoutException : Exception
+    {
+        public bool UrlIssued { get; }
+
+        public LoginTimeoutException(bool urlIssued, TimeSpan budget)
+            : base(urlIssued
+                ? $"Nobody finished the login in the browser within {budget.TotalSeconds:0} seconds of the URL being issued."
+                : $"MSAL did not issue the login URL within {budget.TotalSeconds:0} seconds.")
+        {
+            UrlIssued = urlIssued;
+        }
+    }
+
+    /// <summary>
     /// Azure authentication service using MSAL.
     /// Handles interactive login and token acquisition for both B2C and Entra ID.
     ///
-    /// The MSAL token cache is persisted to disk (see <see cref="AttachPersistentCache"/>).
-    /// Without that, the cache would live only in the static <c>_pca</c> field and every domain
-    /// reload — a script recompile, entering play mode — would wipe it, making silent renewal
-    /// impossible and turning every expired token into a browser prompt.
+    /// One MSAL client per app registration and authority, all of them on the one encrypted token cache of
+    /// the connection store (see <see cref="EncryptedMsalCache"/>): the cache holds the accounts of every
+    /// connection, so a domain reload no longer wipes silent renewal and no project has a cache of its own.
+    /// A connection is pinned to its account: silent renewal asks for that account, never for the first one
+    /// in the cache.
     /// </summary>
     public static class AzureAuthService
     {
-        private static IPublicClientApplication _pca;
-        private static string _currentClientId;
-        private static string _currentTenant;
-        private static string _currentPolicy;
-        private static string _currentAuthType;
-
-        private static string _currentRedirectUri;
+        private static readonly Dictionary<string, IPublicClientApplication> clients = new();
 
         /// <summary>
-        /// Initialize the MSAL client. Re-initializes if parameters change.
+        /// Runs an MSAL call on the thread pool. MSAL calls the cache hooks inline until its first real await, and the hooks
+        /// wait for other processes' locks: that wait must not be the editor's main thread's.
         /// </summary>
-        /// <param name="redirectUri">
-        /// The redirect URI registered in Azure B2C for this client ID (e.g. "http://localhost:10717/").
-        /// Must exactly match one of the URIs registered under "Mobile and desktop applications" in the Azure portal.
-        /// </param>
-        public static void Init(string clientId, string tenant, string policy, string redirectUri)
+        private static Task<T> OffMain<T>(Func<Task<T>> call) => Task.Run(call);
+
+        /// <summary>
+        /// The MSAL client for this app registration and authority, built once per process.
+        /// </summary>
+        public static IPublicClientApplication GetClient(string clientId, AzureB2CConfig authConfig)
         {
-            // Re-initialize if parameters changed
-            if (_pca != null
-                && _currentAuthType == "B2C"
-                && _currentClientId == clientId
-                && _currentTenant == tenant
-                && _currentPolicy == policy
-                && _currentRedirectUri == redirectUri)
+            if (string.IsNullOrEmpty(clientId))
+                throw new ArgumentException("Client id is missing.", nameof(clientId));
+            if (authConfig == null)
+                throw new ArgumentNullException(nameof(authConfig));
+
+            string authority = AuthorityOf(authConfig);
+            string cacheKey = $"{clientId}|{authority}|{authConfig.RedirectUri}";
+
+            lock (clients)
             {
-                return;
+                if (clients.TryGetValue(cacheKey, out IPublicClientApplication existing))
+                    return existing;
+
+                PublicClientApplicationBuilder builder = PublicClientApplicationBuilder
+                    .Create(clientId)
+                    .WithRedirectUri(authConfig.RedirectUri);
+
+                // authConfig.RedirectUri is the one registered in Azure for this client ID (e.g. "http://localhost",
+                // which MSAL turns into a free loopback port); it must match one of the URIs registered under
+                // "Mobile and desktop applications" in the Azure portal.
+                builder = authConfig.IsEntraId ? builder.WithAuthority(authority) : builder.WithB2CAuthority(authority);
+
+                IPublicClientApplication client = builder.Build();
+                EncryptedMsalCache.ForStore().Attach(client);
+
+                clients[cacheKey] = client;
+                return client;
             }
-
-            _currentClientId = clientId;
-            _currentTenant = tenant;
-            _currentPolicy = policy;
-            _currentAuthType = "B2C";
-            _currentRedirectUri = redirectUri;
-
-            string authority = $"https://{tenant}.b2clogin.com/tfp/{tenant}.onmicrosoft.com/{policy}";
-
-            _pca = PublicClientApplicationBuilder
-                .Create(clientId)
-                .WithB2CAuthority(authority)
-                .WithRedirectUri(redirectUri)
-                .Build();
-
-            AttachPersistentCache(_pca);
         }
 
         /// <summary>
-        /// Initialize the MSAL client for Microsoft Entra ID authentication.
+        /// The authority URL of a config. Two connections that share a client id, an authority and an
+        /// account share an MSAL account (see <see cref="ConnectionLoginService.LogoutAsync"/>).
         /// </summary>
-        /// <param name="tenantId">
-        /// The Entra ID tenant identifier (GUID or domain, e.g. "contoso.onmicrosoft.com").
-        /// </param>
-        public static void InitEntraId(string clientId, string tenantId, string redirectUri)
+        public static string AuthorityOf(AzureB2CConfig authConfig)
         {
-            if (_pca != null
-                && _currentAuthType == "EntraID"
-                && _currentClientId == clientId
-                && _currentTenant == tenantId
-                && _currentRedirectUri == redirectUri)
-            {
-                return;
-            }
+            if (authConfig == null)
+                throw new ArgumentNullException(nameof(authConfig));
 
-            _currentClientId = clientId;
-            _currentTenant = tenantId;
-            _currentPolicy = null;
-            _currentAuthType = "EntraID";
-            _currentRedirectUri = redirectUri;
-
-            string authority = $"https://login.microsoftonline.com/{tenantId}";
-
-            _pca = PublicClientApplicationBuilder
-                .Create(clientId)
-                .WithAuthority(authority)
-                .WithRedirectUri(redirectUri)
-                .Build();
-
-            AttachPersistentCache(_pca);
-        }
-
-        /// <summary>
-        /// Resets the MSAL client. Call before Init() to force re-initialization.
-        /// Does not touch the on-disk cache — a later Init() picks it back up, which is what
-        /// makes silent renewal survive domain reloads. Use <see cref="SignOutAsync"/> to
-        /// actually end the Azure session.
-        /// </summary>
-        public static void Reset()
-        {
-            _pca = null;
-            _currentClientId = null;
-            _currentTenant = null;
-            _currentPolicy = null;
-            _currentAuthType = null;
-            _currentRedirectUri = null;
+            return authConfig.IsEntraId
+                ? $"https://login.microsoftonline.com/{authConfig.Tenant}"
+                : $"https://{authConfig.Tenant}.b2clogin.com/tfp/{authConfig.Tenant}.onmicrosoft.com/{authConfig.Policy}";
         }
 
         /// <summary>
@@ -139,49 +161,72 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Acquires an access token, using silent acquisition if possible, falling back to interactive login.
+        /// Acquires an access token for the pinned account silently if it can, and with a login in the
+        /// system browser when it cannot (or when the connection has no account yet).
         /// </summary>
-        /// <returns>A tuple of (accessToken, username) where username is the display name from the ID token,
-        /// falling back to the account username (typically email).</returns>
-        public static async Task<(string AccessToken, string Username)> LoginInteractive(string[] scopes)
+        /// <param name="accountId">The MSAL home account id the connection is pinned to, or null for a first login.</param>
+        /// <param name="cancellation">Cancels the login without it counting as a timeout.</param>
+        /// <exception cref="LoginTimeoutException">The user (or MSAL, before the URL) took longer than the budget.</exception>
+        public static async Task<AzureTokenResult> LoginInteractive(IPublicClientApplication client, string[] scopes, string accountId,
+                                                                    InteractiveLoginOptions options, CancellationToken cancellation = default)
         {
-            if (_pca == null)
-            {
-                throw new InvalidOperationException("AzureAuthService not initialized. Call Init() first.");
-            }
+            if (client == null)
+                throw new ArgumentNullException(nameof(client));
 
+            options ??= new InteractiveLoginOptions();
             AuthenticationResult result = null;
+            IAccount pinned = null;
+
             try
             {
+                AzureTokenResult silent = await TryAcquireTokenSilent(client, scopes, accountId);
+                if (silent != null)
+                    return silent;
+
+                if (!string.IsNullOrEmpty(accountId))
+                    pinned = await OffMain(() => client.GetAccountAsync(accountId));
+
+                bool urlIssued = false;
+                using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+                timeout.CancelAfter(options.UrlBudget);
+
+                SystemWebViewOptions webView = new()
+                {
+                    OpenBrowserAsync = url =>
+                    {
+                        // The user's time starts here, not at the call: see InteractiveLoginOptions.UrlBudget.
+                        urlIssued = true;
+                        timeout.CancelAfter(options.UserBudget);
+
+                        string text = url.ToString();
+                        options.OnAuthUrl?.Invoke(text);
+
+                        if (options.OpenBrowser)
+                            OpenInBrowser(text);
+
+                        return Task.CompletedTask;
+                    }
+                };
+
                 try
                 {
-                    var accounts = await _pca.GetAccountsAsync();
-                    var firstAccount = accounts.FirstOrDefault();
-                    if (firstAccount != null)
-                    {
-                        result = await _pca.AcquireTokenSilent(scopes, firstAccount)
-                                          .ExecuteAsync();
-
-                        // If silent returned no access token (cached ID-only token), force interactive
-                        if (string.IsNullOrEmpty(result.AccessToken))
-                        {
-                            throw new MsalUiRequiredException("no_access_token", "Silent token has no access token");
-                        }
-                    }
-                    else
-                    {
-                        throw new MsalUiRequiredException("no_account", "No cached account found");
-                    }
-                }
-                catch (MsalUiRequiredException)
-                {
-                    result = await _pca.AcquireTokenInteractive(scopes)
+                    AcquireTokenInteractiveParameterBuilder builder = client.AcquireTokenInteractive(scopes)
                         .WithUseEmbeddedWebView(false)
+                        .WithSystemWebViewOptions(webView)
                         .WithExtraQueryParameters(new Dictionary<string, string>
                         {
                             { "nonce", Guid.NewGuid().ToString() }
-                        })
-                        .ExecuteAsync();
+                        });
+
+                    // The pinned account goes to the browser as a hint, so that its single sign-on does not offer another one.
+                    if (pinned != null)
+                        builder = builder.WithAccount(pinned);
+
+                    result = await OffMain(() => builder.ExecuteAsync(timeout.Token));
+                }
+                catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+                {
+                    throw new LoginTimeoutException(urlIssued, urlIssued ? options.UserBudget : options.UrlBudget);
                 }
             }
             catch (MsalException ex)
@@ -190,74 +235,79 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 throw;
             }
 
+            // The hint is only a hint: whoever the browser signed in is checked against the pinned account.
+            if (!string.IsNullOrEmpty(accountId) && result.Account?.HomeAccountId?.Identifier != accountId)
+                throw new LoginAccountMismatchException();
+
             if (!string.IsNullOrEmpty(result.AccessToken) && result.ExpiresOn <= DateTimeOffset.Now.AddMinutes(5))
             {
-                result = await _pca.AcquireTokenSilent(scopes, result.Account).ExecuteAsync();
+                IAccount signedIn = result.Account;
+                result = await OffMain(() => client.AcquireTokenSilent(scopes, signedIn).ExecuteAsync());
             }
 
-            return (result.AccessToken, ExtractUsername(result));
+            return ToResult(result);
         }
 
         /// <summary>
-        /// Acquires an access token from the cached account only, never showing UI.
-        /// Returns (null, null) when there is no usable cached account or the refresh token is
-        /// gone — the caller decides whether to escalate to an interactive login.
+        /// Acquires an access token for the pinned account only, never showing UI.
+        /// Returns null when there is no such account or the refresh token is gone: the caller decides
+        /// whether to escalate to an interactive login.
         /// </summary>
-        public static async Task<(string AccessToken, string Username)> TryAcquireTokenSilent(string[] scopes)
+        public static async Task<AzureTokenResult> TryAcquireTokenSilent(IPublicClientApplication client, string[] scopes, string accountId)
         {
-            if (_pca == null)
-                return (null, null);
+            if (client == null || string.IsNullOrEmpty(accountId))
+                return null;
 
             try
             {
-                var accounts = await _pca.GetAccountsAsync();
-                var firstAccount = accounts.FirstOrDefault();
-                if (firstAccount == null)
-                    return (null, null);
+                IAccount account = await OffMain(() => client.GetAccountAsync(accountId));
+                if (account == null)
+                    return null;
 
-                AuthenticationResult result = await _pca.AcquireTokenSilent(scopes, firstAccount).ExecuteAsync();
+                AuthenticationResult result = await OffMain(() => client.AcquireTokenSilent(scopes, account).ExecuteAsync());
 
-                if (string.IsNullOrEmpty(result.AccessToken))
-                    return (null, null);
-
-                return (result.AccessToken, ExtractUsername(result));
+                // A cached ID-only token has no access token to use.
+                return string.IsNullOrEmpty(result.AccessToken) ? null : ToResult(result);
             }
             catch (MsalUiRequiredException)
             {
                 // Expected whenever the refresh token expired or was revoked.
-                return (null, null);
+                return null;
             }
             catch (MsalException ex)
             {
                 Debug.LogWarning($"[AzureAuthService] Silent token acquisition failed: {ex.Message}");
-                return (null, null);
+                return null;
             }
         }
 
         /// <summary>
-        /// Removes the cached accounts and deletes the on-disk cache, so the next login really
-        /// prompts. Without this a "logout" would leave a usable refresh token behind.
+        /// Removes the account from the cache, so the next login really prompts. Without this a
+        /// "logout" would leave a usable refresh token behind.
         /// </summary>
-        public static async Task SignOutAsync()
+        public static async Task RemoveAccountAsync(IPublicClientApplication client, string accountId)
         {
+            if (client == null || string.IsNullOrEmpty(accountId))
+                return;
+
             try
             {
-                if (_pca != null)
-                {
-                    foreach (IAccount account in await _pca.GetAccountsAsync())
-                        await _pca.RemoveAsync(account);
-                }
+                IAccount account = await OffMain(() => client.GetAccountAsync(accountId));
+                if (account != null)
+                    await OffMain(async () => { await client.RemoveAsync(account); return true; });
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AzureAuthService] Could not remove cached accounts: {ex.Message}");
-            }
-            finally
-            {
-                DeleteCacheFiles();
-                Reset();
+                Debug.LogWarning($"[AzureAuthService] Could not remove the cached account: {ex.Message}");
             }
         }
+
+        private static AzureTokenResult ToResult(AuthenticationResult result) => new()
+        {
+            AccessToken = result.AccessToken,
+            Username = ExtractUsername(result),
+            AccountId = result.Account?.HomeAccountId?.Identifier,
+        };
 
         /// <summary>
         /// Prefer the "name" claim from the ID token, fall back to account username (email).
@@ -271,87 +321,28 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 ?? result.Account?.Username;
         }
 
-        #region Token cache persistence
-
-        // Project-local and outside version control, so the cache never follows the project
-        // around. Losing it (a Library wipe) costs exactly one interactive login.
-        private static string CacheDirectory =>
-            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Library", "Virtuademy", "Auth"));
-
         /// <summary>
-        /// Wires MSAL's cache to a file under Library/. Keyed by client id and authority so
-        /// switching app or environment does not read another tenant's cache.
-        ///
-        /// NOTE: the blob holds the refresh token unencrypted. Unity's .NET Standard profile has
-        /// no DPAPI (System.Security.Cryptography.ProtectedData), so this matches what the editor
-        /// already does with the bearer token in EditorPrefs. It is per-user and per-project, but
-        /// it is not a secret store.
+        /// Opens the URL the way MSAL's own default does. Not <c>Application.OpenURL</c>: MSAL calls this on a
+        /// thread of its own, and the engine's API is the main thread's.
         /// </summary>
-        private static void AttachPersistentCache(IPublicClientApplication app)
-        {
-            string cacheFilePath = Path.Combine(CacheDirectory, $"msal_{Sanitize(_currentAuthType)}_{Sanitize(_currentClientId)}_{Sanitize(_currentTenant)}.bin");
-
-            app.UserTokenCache.SetBeforeAccess(args =>
-            {
-                try
-                {
-                    if (File.Exists(cacheFilePath))
-                        args.TokenCache.DeserializeMsalV3(File.ReadAllBytes(cacheFilePath), shouldClearExistingCache: true);
-                }
-                catch (Exception ex)
-                {
-                    // A corrupt or unreadable cache must not break login: it just means the user
-                    // authenticates interactively once more.
-                    Debug.LogWarning($"[AzureAuthService] Could not read the token cache: {ex.Message}");
-                }
-            });
-
-            app.UserTokenCache.SetAfterAccess(args =>
-            {
-                if (!args.HasStateChanged)
-                    return;
-
-                try
-                {
-                    Directory.CreateDirectory(CacheDirectory);
-                    File.WriteAllBytes(cacheFilePath, args.TokenCache.SerializeMsalV3());
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"[AzureAuthService] Could not write the token cache: {ex.Message}");
-                }
-            });
-        }
-
-        private static void DeleteCacheFiles()
+        private static void OpenInBrowser(string url)
         {
             try
             {
-                if (!Directory.Exists(CacheDirectory))
-                    return;
-
-                foreach (string file in Directory.GetFiles(CacheDirectory, "msal_*.bin"))
-                    File.Delete(file);
+#if UNITY_EDITOR_OSX
+                Process.Start(new ProcessStartInfo("open", $"\"{url}\"") { UseShellExecute = false });
+#elif UNITY_EDITOR_LINUX
+                Process.Start(new ProcessStartInfo("xdg-open", $"\"{url}\"") { UseShellExecute = false });
+#else
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+#endif
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[AzureAuthService] Could not delete the token cache: {ex.Message}");
+                // The URL was already handed to OnAuthUrl: whoever shows it can still finish the login.
+                Debug.LogWarning($"[AzureAuthService] Could not open the browser: {ex.Message}");
             }
         }
-
-        private static string Sanitize(string value)
-        {
-            if (string.IsNullOrEmpty(value))
-                return "none";
-
-            StringBuilder sb = new(value.Length);
-            foreach (char c in value)
-                sb.Append(char.IsLetterOrDigit(c) ? c : '_');
-
-            return sb.ToString();
-        }
-
-        #endregion
 
         private static readonly HttpClient _httpClient = new HttpClient();
 

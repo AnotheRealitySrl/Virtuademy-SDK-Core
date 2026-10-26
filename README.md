@@ -122,11 +122,77 @@ secret: nothing logs its content.
 Three `ScriptableObject` bases an application extends: `BuildScriptBase`, `AbstractAppConfigurator`,
 `AbstractPlatformSettings`.
 
-Editor authentication runs on MSAL — `AzureAuthService`, `EditorSessionManager`, `EditorLoginState`,
-`EditorApiEndpoint`, `JwtBearerInspector`, against the three precompiled DLLs under
-`Editor/Microsoft.Identity/`. In batch mode a session is renewed silently or not at all:
-`EditorSessionManager.InteractiveLoginAllowed` is false, so no call opens the browser. `AndroidLaunchSchemeInjector` is an
-`IPostGenerateGradleAndroidProject` that writes the launch scheme into the generated Gradle project.
+`AndroidLaunchSchemeInjector` is an `IPostGenerateGradleAndroidProject` that writes the launch scheme into the
+generated Gradle project.
+
+#### Editor login: connections in a per-user store
+
+Editor authentication runs on MSAL, against the three precompiled DLLs under `Editor/Microsoft.Identity/`, and a
+login is a **connection** (meta-repo ADR 0037): one tenant of one Configuration-API instance, with its Azure
+account and its platform token. Its key is the instance's normalized base URL plus the `tenantKey` that
+`GET /manage/apps/tenant/config-public` returns (`TenantPublicConfig.TenantKey`): the tenant key alone is not unique,
+because every Configuration-API instance has its own Platform DB. A credential whose `config-public` gives no
+`tenantKey` (a platform-admin app) cannot become a connection.
+
+The connections live in one store per OS user, **outside every project**, shared by every project and Unity process of
+that user: `%LOCALAPPDATA%\Virtuademy\SDK\`.
+
+| File | Holds |
+|---|---|
+| `connections.bin` | every connection: the app credential imported from the Back Office file, the session, the MSAL account it is pinned to. Encrypted with DPAPI for the current user (a P/Invoke to `crypt32`, `Dpapi`: `ProtectedData` is not referenced here). A revision on each record. |
+| `msal.bin` | the one MSAL token cache for every account, through MSAL's own hooks (`EncryptedMsalCache`), encrypted the same way. |
+| `status.json` | the same connections **without any secret**: label, environment, user, whether the token is valid, when it expires. A script can read it without starting Unity. |
+| `*.lock` | lock files (`FileShare.None`, released by the OS when the process dies) that order writers across processes. |
+
+A writer takes the lock, reads the file again, changes **only its own connection** and replaces the file atomically; one
+process renews a connection and the others read what it stored. Nothing is kept in SessionState or EditorPrefs, and an
+asset-import worker process never reads or writes the store. **Where nothing can be encrypted (every OS but Windows, for
+now) the connections stay in the editor process**, carried over a domain reload through SessionState (process memory) and gone
+when the editor closes; nothing is written to disk. A batch `login` is refused there, since it would end with the process.
+
+`ConnectionLoginService` is the login with no UI: `LoginAsync` reads the tenant, the public configuration and the auth
+config over HMAC, runs the Azure login and exchanges the token, and ends with the connection in the store. The window,
+the command line and the request pump all call it. Silent renewal is pinned to the connection's account, never to the
+first account of the cache, and the browser is given that account as a hint (an answer for another one is refused). An interactive login uses the system browser and a loopback port MSAL picks; it **prints
+the authorization URL as well as opening it** (`InteractiveLoginOptions.OnAuthUrl`), allows MSAL a minute to issue it
+and the user three minutes **from the moment the URL is issued** (`LoginTimeoutException` says which phase ran out).
+Logout drops the connection's token and removes its MSAL account only when no other connection uses the same authority and
+account.
+
+A project says which connections it uses in `UserSettings/Virtuademy/connections.json` (`ProjectConnections`: no token
+and no secret, keys only). Its **active** connection is the one the window, the deploy and the other editor requests that
+name no connection go to: `EditorLoginState` is the view of it, and `EditorApiEndpoint` takes the Application API address from
+the tenant that connection reported at login, never from the project's `PlatformEndpoints` asset. `EditorSessionManager`
+renews and sends on any connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it means the active one.
+**An operation takes its connection once, at the start, and passes the key down** (the deploy, the published-environments
+index, the script verification all do): the active connection can change while it runs, and the token of a connection is
+sent only to the hosts of its own tenant (anything else is refused before it is sent). Logins from the command line and
+request files make the connection active only when the project has none. In
+batch mode a session is renewed silently or not at all (`EditorSessionManager.InteractiveLoginAllowed` is false): the `login`
+command is how a browser is asked for.
+
+The first use of the store in a process runs the one-time migration of the old per-machine login (`LegacyLoginMigration`):
+it deletes `Virtuademy_EditorLogin_Token` from EditorPrefs, where the token sat in clear text, and nothing else; the other nine
+`Virtuademy_EditorLogin_*` keys stay for an older SDK on the same machine, and nothing reads them. The credentials of the
+project's own configuration files go into the store the first time the Available Tenants window opens in an editor
+session (`ImportProjectCredentialsAsync`, which asks the platform once per credential), or at the first `login -vdApp`.
+Each connection then needs one login.
+
+**From the command line and a script.** `EnvironmentsCli` (in `Virtuademy-SDK-Environments`) has `login`, `logout`,
+`connections` and `whoami`, which write a JSON result to the file `-vdResultFile` names. They run in batch mode only while
+the project is closed, because Unity refuses a second instance of a project (`Temp/UnityLockfile` tells the two cases apart).
+While the editor has the project open, a script drops a request file in `UserSettings/Virtuademy/requests/` and the editor
+answers it (`EditorRequestPump`, polling from `EditorApplication.update` every 250 ms, also when the
+window is unfocused):
+
+- Write `<id>.json.tmp` and rename it to `<id>.json`: `{ "command": "login" | "logout" | "status", "connection": "...", "app":
+  "...", "env": "...", "noBrowser": false, "loginTimeoutSeconds": 180, "resultFile": "path" }`. `connection` is a key, a tenant
+  key, a tenant label or `app/env`; `app` and `env` name a credential of the project's configuration files that is not in the
+  store yet. Only those three commands are accepted, never a build or a deploy.
+- The answer is `<id>.result.json` (or `resultFile`), with `state: done` and `status` (`done`, `login-required`,
+  `connection-unknown`, `login-timeout`, `login-failed`, `bad-request`). A login writes it first with
+  `state: awaiting-browser` and the `authUrl`. The request file is renamed `.working` when it is picked up and `.done` when handled.
+- No answer, and no output of any of these commands, contains a token or a secret.
 
 ## What is deliberately absent
 
@@ -145,6 +211,18 @@ Editor authentication runs on MSAL — `AzureAuthService`, `EditorSessionManager
   matter of asmdef discipline.
 
 ## Known issues / TODO
+
+- **The connection store has no macOS or Linux implementation.** The record file and the MSAL cache are encrypted
+  with DPAPI, so on Windows only. Elsewhere the connections live in the editor process (SessionState) and a warning says so;
+  the memory mode was tested on Windows by forcing it.
+  The macOS one (an AES-CBC + HMAC-SHA256 file whose key is in the Keychain) is not written; its lock file
+  (`FileShare.None`) is not tested on Mono for macOS either. Tested so far on Windows, Unity 6000.3.21f1, with a fake platform:
+  no real B2C login has been run through it.
+- **Deploy targets are not per connection yet.** The Addressables window deploys the worlds it listed for the project's
+  active connection (it refuses when that changed since), and its ticks are kept per project and connection (the old
+  machine-wide value is no longer read). `UserSettings/Virtuademy/connections.json` holds the connections used, the active one and the play-mode
+  one; the play-mode one is recorded and not read yet (the tenant switch still writes `PlatformCredentials.asset` from the
+  window's selected file), and the check that git ignores `UserSettings/` and `PlatformCredentials.asset` is not made.
 
 - **`TenantConfigurationClient`'s doc comment reads backwards.** It says the base class "was the
   last thing tying this package to `Virtuademy-SDK-Core`" — written when that name meant the
@@ -169,8 +247,8 @@ Editor authentication runs on MSAL — `AzureAuthService`, `EditorSessionManager
     Hosted there, the browser's address bar shows the storage account's host
     (`spacsglobal.blob.core.windows.net`), which the B2C pages never show: B2C fetches them server
     side and serves them under `b2clogin.com`.
-  - Success: `.WithSystemWebViewOptions(new SystemWebViewOptions { BrowserRedirectSuccess = … })` on
-    the `AcquireTokenInteractive` call in `AzureAuthService.LoginInteractive`, pointing at the
+  - Success: `BrowserRedirectSuccess = …` on the `SystemWebViewOptions` of the `AcquireTokenInteractive` call in
+    `AzureAuthService.LoginInteractive` (which already sets `OpenBrowserAsync` there), pointing at the
     success page. MSAL answers the browser with a `302` to that URL.
   - Error: MSAL's `BrowserRedirectError` is a fixed URL too and carries nothing of the error (checked
     against the listener of MSAL 4.61.0, the version this package ships: the `Location` header is

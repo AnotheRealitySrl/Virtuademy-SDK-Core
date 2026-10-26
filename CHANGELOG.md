@@ -3,9 +3,61 @@
 ## Unreleased
 
 Minor bump: additive API, plus behaviour changes an external app will notice (listed under
-Changed).
+Changed). The editor login API changes shape (ADR 0037, platform 2026.7.0): the members that went are named
+under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 
 ### Added
+- **Editor logins are connections in a per-user encrypted store** (meta-repo ADR 0037, first slice). A connection is one
+  tenant of one Configuration-API instance: its key is the instance's normalized base URL plus the `tenantKey` of
+  `config-public`, and it holds the app credential imported from the Back Office file, the session and the MSAL account it is
+  pinned to. The store is under `%LOCALAPPDATA%\Virtuademy\SDK\`, outside every project, shared by every project and
+  process of the OS user: `connections.bin` (DPAPI for the current user, through a P/Invoke to `crypt32`), `msal.bin` (the
+  one multi-account MSAL cache, through `SetBeforeAccess`/`SetAfterAccess`, encrypted the same way), `status.json` (the
+  connections with no secret, readable without Unity) and lock files (`FileShare.None`). Each record has a revision; a writer
+  takes the lock, re-reads the file, changes only its own connection and replaces the file atomically. Where nothing can be
+  encrypted (every OS but Windows for now; the macOS Keychain one is pending) the connections stay in memory for the editor
+  session, carried over a domain reload through SessionState (process memory, never EditorPrefs or a file), so a script
+  recompilation does not log the creator out; nothing is written. A batch `login` is refused there (exit 29 in
+  `EnvironmentsCli`), because it would end with the process, and the old registry token is not deleted. Asset-import worker
+  processes never read or write it. New types: `ConnectionStore`,
+  `ConnectionRecord`, `ProjectConnections`, `EditorRequestPump`, plus the internal `Dpapi`, `StoreCrypto`, `FileLock` and
+  `EncryptedMsalCache`.
+- **`ConnectionLoginService`: the login with no UI.** What `TenantSelectionWindow.OnLoginClicked` did inline (the HMAC reads of
+  the tenant, the public configuration and the auth config, the validation of the config, the client id) is a service that the
+  window, the command line and the request pump share. `LoginAsync` (by credential or by connection key), `AddConnectionAsync`,
+  `ImportProjectCredentialsAsync`, `LogoutAsync`. An interactive login prints the authorization URL as well as opening the
+  browser (`InteractiveLoginOptions.OnAuthUrl`, `OpenBrowser`), gives MSAL 60 s to issue it and the user three minutes counted
+  from that moment (`LoginTimeoutException`, with `UrlIssued` saying which phase ran out), and pins the connection to its
+  account. Two logins for one credential share one browser flow.
+- **`ConnectionCommands` and `EditorRequestPump`**: `login`, `logout`, `connections`, `whoami` and `status` as one command layer.
+  The command line (`EnvironmentsCli`, in `Virtuademy-SDK-Environments`) runs it in batch while the project is closed; an editor
+  that has the project open polls `UserSettings/Virtuademy/requests/` from `EditorApplication.update` (250 ms, not in batch mode
+  or in a worker process), runs `login`, `logout` and `status` requests only (never a build or a deploy), writes the answer next
+  to the request or where `resultFile` says (a login first writes `state: awaiting-browser` with the URL) and renames the
+  request `.working` then `.done`. No answer carries a token or a secret.
+- **A token goes only to its own connection's hosts.** `EditorSessionManager` refuses (`InvalidOperationException`, nothing
+  sent) a request whose host is not one of the connection's tenant APIs, and the editor tools take the connection key once per
+  operation and pass it down: `EnvironmentsDeploy`, `PublishedEnvironmentsIndex`, the hot-update verifier and policy fetch
+  all take an optional `connectionKey` (null means the active one, read once at the start). The project's active connection
+  can change while a deploy runs (a selection, a login) without the deploy following it.
+- `ConnectionStore.UpdateAsync` and `LockRenewalAsync`: another process's lock is awaited with `Task.Delay`, not slept on, so
+  the editor's main thread is never held up behind it (a 3 s hold: the loop ticked normally). MSAL calls that touch the cache
+  run on the thread pool for the same reason. The synchronous `Update` remains for code off the main thread.
+- `LoginOptions.MakeActive` (default false): a login from the command line or a request file adds the connection to the
+  project and makes it the active one only when the project has none; the window sets it, because a click is a choice.
+- The interactive login passes the pinned account to the browser (`WithAccount`) and refuses an answer for another account
+  (`LoginAccountMismatchException`, code `account-mismatch`): the browser's single sign-on cannot swap the connection's user.
+  A request that joins a login in flight hears the same authorization URL.
+- `ProjectConnections` (`UserSettings/Virtuademy/connections.json`, no token and no secret): the connections the project uses,
+  its active one and the play-mode one. The play-mode one is recorded and not read yet.
+- `LegacyLoginMigration`: the first use of the store in a process deletes `Virtuademy_EditorLogin_Token` from EditorPrefs and
+  SessionState (once per OS user, a marker in the store folder says so) and nothing else; the other nine
+  `Virtuademy_EditorLogin_*` keys stay for an older SDK on the same machine and nothing reads them.
+- `TenantPublicConfig.TenantKey` and `.Environment`, from `config-public` (`tenantKey` is the connection's key, `environment`
+  is for display).
+- `EditorSessionManager` methods that name the connection: `EnsureValidTokenAsync(connectionKey, ...)`,
+  `SendAuthorizedAsync(connectionKey, ...)`, `LogoutAsync(connectionKey)`; `EditorApiEndpoint.ApplicationApiUrlOf(connectionKey)`;
+  `EditorLoginState.ActiveConnectionKey`.
 - `ITokenProviderNotifications`, with the event `TokensChanged`: a token provider implements it to
   tell its clients that the tokens it handed out were cleared (sign-out) or replaced. Separate from
   `ITokenProvider`, so existing providers keep compiling.
@@ -16,6 +68,29 @@ Changed).
 - `ApiResponseError.Display(long statusCode, string content)`.
 
 ### Changed
+- **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only
+  view of the project's active connection: nothing is kept in SessionState or EditorPrefs any more (the token sat in clear text
+  in the registry), and a renewal or a logout done by another process shows at once. Removed: `EditorLoginState.Set`,
+  `UpdateToken`, `MarkTokenExpired` and `Clear`, and `EditorSessionManager.LoginAsync(Tenant, ...)` (use
+  `ConnectionLoginService.LoginAsync`). Old sessions are not carried over: every connection needs one login.
+- **`AzureAuthService` has no static client any more**: `Init`, `InitEntraId`, `Reset`, `SignOutAsync` and the per-project
+  cache under `Library/Virtuademy/Auth` are gone; `GetClient(clientId, authConfig)` returns one MSAL client per app registration
+  and authority, all on the store's cache, and `LoginInteractive`, `TryAcquireTokenSilent` and `RemoveAccountAsync` take the
+  client and the account to use. Silent renewal is **pinned to the connection's account**: it used to take the first account in
+  the cache, which another tenant's login could have put there.
+- **`EditorApiEndpoint` resolves from the connection** (behaviour change). The Application API address is the one the
+  connection's tenant reported at login; the project's generated `PlatformEndpoints` asset no longer decides where an editor
+  request goes (the build still reads it). A token goes to the host of the connection it belongs to.
+- **A damaged or busy store file is handled carefully.** A reader without the lock keeps its last copy when the file is held
+  or swapped (it opens with `FileShare.ReadWrite | Delete`), and never sets it aside; only a change, under the lock, sets a
+  file nobody can decrypt aside. The swap is retried for about a second, and when it fails half-way (Windows error 1177) the
+  new file is moved into place instead of being deleted.
+- **The project's old `Library/Virtuademy/Auth/msal_*.bin` are deleted** the first time the store is used in the project: they
+  held a refresh token in clear text and nothing reads them. A request file's `resultFile` must lie inside the requests folder.
+- **Available Tenants window**: the login button calls `ConnectionLoginService`. Selecting a file whose credential already
+  is a connection makes it the project's active one. On first open in an editor session it adds the project's credentials to the
+  store (one request to the platform per credential not yet there). The mismatch warning no longer says that logging in
+  switches the session: it adds a connection and the other stays logged in.
 - **Requests created by `HttpHelper.CreateHttpRequest` time out after 120 s** (`UnityWebRequest.timeout`,
   which bounds the whole request). They had no timeout. Uploads (`RawBytes`, `MultipartFormData`)
   keep none. A request that legitimately takes longer needs `timeout` set on it, or the default
@@ -34,6 +109,13 @@ Changed).
   when a failed response's body was not JSON (the HTML page of a 502 from a proxy or gateway) or
   was `null`: the caller got an exception instead of a failed response. The body is now parsed
   safely and logged as an excerpt when it is not a problem-details object.
+- **Selecting another configuration in Available Tenants left the Addressables window on the previous connection**
+  (its login, worlds and ticks): the window refreshed only itself. It now raises `EditorLoginState.OnLoginStateChanged`,
+  which every window that shows the active connection listens to. A deploy started there was already refused, because the
+  connection had changed since its worlds were listed.
+- **The session label showed the time without the date** ("session until 12:20" for a session that ends in a week), so a
+  valid session read as one about to expire. The labels and the login and renewal logs now add the day and month when
+  the moment is not today ("session until 2 Nov 12:20"; `EditorSessionManager.FormatLocal`).
 
 ## v0.3.0
 
@@ -49,7 +131,9 @@ resolve` does it. SDK-Environments v10.0.0, moved the same day, needs this commi
   "Connect the SDK to your tenant" does by hand: the file downloaded from the Back Office (**Download SDK
   Environments Config**) goes into the project (`Assets/Editor/TenantConfiguration`, the folder of the settings
   asset, unless it already is under `Assets/`), into the **App Assets** of the `AppConfigurationSettings` asset,
-  and is selected (its app, from the file name, and the file's first environment, or the one asked for). The file
+  and is selected (its app, from the file name, and the file's first environment, or the one asked for). The copy drops the
+  " (1)" a browser adds to a second download of the same file, so the app keeps the Back Office's name and a newer download
+  replaces the older one. The file
   is validated (an environment with an app id, a secret and an API base URL) and nothing of its content is logged
   or quoted in an error. **It holds the app's secret, so the importer refuses to put it where git would track
   it:** when the project is inside a git work tree it asks git (`git check-ignore`) about the destination (and the
