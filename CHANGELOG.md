@@ -10,7 +10,8 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 - **Editor logins are connections in a per-user encrypted store** (meta-repo ADR 0037, first slice). A connection is one
   tenant of one Configuration-API instance: its key is the instance's normalized base URL plus the `tenantKey` of
   `config-public`, and it holds the app credential imported from the Back Office file, the session and the MSAL account it is
-  pinned to. The store is under `%LOCALAPPDATA%\Virtuademy\SDK\`, outside every project, shared by every project and
+  pinned to. The store is under `%USERPROFILE%\.virtuademy\sdk\` (not `%LOCALAPPDATA%`, which a packaged app such as the
+  Claude desktop app can redirect for the processes it starts), outside every project, shared by every project and
   process of the OS user: `connections.bin` (DPAPI for the current user, through a P/Invoke to `crypt32`), `msal.bin` (the
   one multi-account MSAL cache, through `SetBeforeAccess`/`SetAfterAccess`, encrypted the same way), `status.json` (the
   connections with no secret, readable without Unity) and lock files (`FileShare.None`). Each record has a revision; a writer

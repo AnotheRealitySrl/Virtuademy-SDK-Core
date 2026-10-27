@@ -135,7 +135,9 @@ because every Configuration-API instance has its own Platform DB. A credential w
 `tenantKey` (a platform-admin app) cannot become a connection.
 
 The connections live in one store per OS user, **outside every project**, shared by every project and Unity process of
-that user: `%LOCALAPPDATA%\Virtuademy\SDK\`.
+that user: `%USERPROFILE%\.virtuademy\sdk\`. Not `%LOCALAPPDATA%`: a packaged (MSIX) app can redirect that folder,
+`%APPDATA%` and `HKCU` for the processes it starts, so a command line started from such an app (the Claude desktop app,
+for one) would keep a store of its own beside the editor's. The profile folder is not redirected.
 
 | File | Holds |
 |---|---|
