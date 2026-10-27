@@ -52,7 +52,12 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 - `ProjectConnections` (`UserSettings/Virtuademy/connections.json`, no token and no secret): the connections the project uses
   and its default connection (`DefaultKey`), chosen in Available Tenants. It is what an editor request or a command that names
   no connection falls back to, and the one Available Tenants shows and "Configure App" uses; it decides neither where a
-  deploy goes nor play mode.
+  deploy goes nor play mode. The same file keeps the project's deploy targets, per connection a world or the tenant level
+  (`ProjectConnections.DeployTarget`, `TargetsOf`, `SetTargets`), which the Addressables management window of
+  `Virtuademy-SDK-Environments` ticks. A connection added from a configuration file of the project
+  (`ConnectionLoginService.AddConnectionAsync`, the import of the project's files) counts as one the project uses; a login that
+  fails does not bind its connection or change the default one. `ConnectionLoginService.RefreshConnectionAsync(key)` reads a
+  stored connection's tenant again over HMAC (label, environment, platform version), with no login.
 - `LegacyLoginMigration`: the first use of the store in a process deletes `Virtuademy_EditorLogin_Token` from EditorPrefs and
   SessionState (once per OS user, a marker in the store folder says so) and nothing else; the other nine
   `Virtuademy_EditorLogin_*` keys stay for an older SDK on the same machine and nothing reads them.
@@ -114,8 +119,7 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
   safely and logged as an excerpt when it is not a problem-details object.
 - **Selecting another configuration in Available Tenants left the Addressables window on the previous connection**
   (its login, worlds and ticks): the window refreshed only itself. It now raises `EditorLoginState.OnLoginStateChanged`,
-  which every window that shows the default connection listens to. A deploy started there was already refused, because the
-  connection had changed since its worlds were listed.
+  which every window that shows the default connection listens to.
 - **The session label showed the time without the date** ("session until 12:20" for a session that ends in a week), so a
   valid session read as one about to expire. The labels and the login and renewal logs now add the day and month when
   the moment is not today ("session until 2 Nov 12:20"; `EditorSessionManager.FormatLocal`).

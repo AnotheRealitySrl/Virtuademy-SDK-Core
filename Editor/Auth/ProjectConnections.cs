@@ -23,15 +23,35 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// the selected file). It is chosen in the Available Tenants window (a selection
     /// or a login there makes it the default one). A login from the command line or a request file makes its
     /// connection the default one only when the project has none (<see cref="Use"/>).
-    /// The deploy targets, and the world ticks that used to live in one machine-wide EditorPrefs value, join
-    /// this file in a later step.
+    /// <para>
+    /// The file also keeps the project's deploy targets (<see cref="TargetsOf"/>): per connection, the worlds and the
+    /// tenant level ticked in the Addressables management window. They replace the world ticks that lived in one
+    /// machine-wide EditorPrefs value and were ticked again in any tenant and project.
+    /// </para>
     /// </remarks>
     public static class ProjectConnections
     {
+        /// <summary>
+        /// One deploy target of the project: a world of a connection, or the connection's tenant level. More per-target
+        /// choices can join it without changing the file's shape.
+        /// </summary>
+        public sealed class DeployTarget
+        {
+            public string Connection { get; set; }
+
+            /// <summary>The world, or null for the tenant level.</summary>
+            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public int? WorldId { get; set; }
+
+            [JsonIgnore]
+            public bool TenantLevel => WorldId == null;
+        }
+
         private sealed class Selection
         {
             public List<string> Used { get; set; } = new();
             public string Default { get; set; }
+            public List<DeployTarget> Targets { get; set; } = new();
 
             /// <summary>
             /// Read only: what the first implementation called the "active connection" and wrote here. It was the one the
@@ -126,6 +146,42 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             }
         }
 
+        /// <summary>The deploy targets the project keeps for one connection: its ticked worlds and, when ticked, its tenant level.</summary>
+        public static IReadOnlyList<DeployTarget> TargetsOf(string connectionKey)
+        {
+            if (string.IsNullOrEmpty(connectionKey))
+                return Array.Empty<DeployTarget>();
+
+            lock (gate)
+            {
+                return Read().Targets
+                    .Where(t => string.Equals(t.Connection, connectionKey, StringComparison.OrdinalIgnoreCase))
+                    .Select(t => new DeployTarget { Connection = t.Connection, WorldId = t.WorldId })
+                    .ToList();
+            }
+        }
+
+        /// <summary>Replaces the deploy targets of one connection; the other connections' targets are kept as they are.</summary>
+        public static void SetTargets(string connectionKey, IEnumerable<int> worldIds, bool tenantLevel)
+        {
+            if (string.IsNullOrEmpty(connectionKey) || ConnectionStore.IsWorkerProcess)
+                return;
+
+            lock (gate)
+            {
+                Selection selection = Read();
+                selection.Targets.RemoveAll(t => string.Equals(t.Connection, connectionKey, StringComparison.OrdinalIgnoreCase));
+
+                foreach (int id in (worldIds ?? Enumerable.Empty<int>()).Distinct().OrderBy(id => id))
+                    selection.Targets.Add(new DeployTarget { Connection = connectionKey, WorldId = id });
+
+                if (tenantLevel)
+                    selection.Targets.Add(new DeployTarget { Connection = connectionKey });
+
+                Write(selection);
+            }
+        }
+
         private static Selection Read()
         {
             string path = FilePath;
@@ -139,6 +195,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             try
             {
                 cache = JsonConvert.DeserializeObject<Selection>(File.ReadAllText(path, Encoding.UTF8)) ?? new Selection();
+                cache.Used ??= new List<string>();
+                cache.Targets ??= new List<DeployTarget>();
 
                 // Older files of this change: the window's choice was Active, later PlayMode.
                 if (string.IsNullOrEmpty(cache.Default))
@@ -158,8 +216,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private static void Write(Selection selection)
         {
-            Directory.CreateDirectory(Folder);
-            ConnectionStore.WriteAtomic(FilePath, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(selection, Formatting.Indented)));
+            try
+            {
+                Directory.CreateDirectory(Folder);
+                ConnectionStore.WriteAtomic(FilePath, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(selection, Formatting.Indented)));
+            }
+            catch
+            {
+                // The cached copy was changed in place: read the file again next time rather than trust it.
+                cache = null;
+                throw;
+            }
+
             cache = selection;
             cacheStamp = File.GetLastWriteTimeUtc(FilePath).Ticks;
         }

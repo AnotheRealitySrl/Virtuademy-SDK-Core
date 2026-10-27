@@ -171,7 +171,10 @@ connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it 
 **An operation takes its connection once, at the start, and passes the key down** (the deploy, the published-environments
 index, the script verification all do): the default connection can change while it runs, and the token of a connection is
 sent only to the hosts of its own tenant (anything else is refused before it is sent). Logins from the command line and
-request files make the connection the default one only when the project has none. In
+request files make the connection the default one only when the project has none. The same file keeps the project's
+deploy targets: per connection, the worlds and the tenant level ticked in the Addressables management window
+(`ProjectConnections.TargetsOf`, `SetTargets`). Every connection a configuration file of the project stands for counts as
+one the project uses, logged in or not. In
 batch mode a session is renewed silently or not at all (`EditorSessionManager.InteractiveLoginAllowed` is false): the `login`
 command is how a browser is asked for.
 
@@ -220,14 +223,11 @@ window is unfocused):
   with DPAPI, so on Windows only. Elsewhere the connections live in the editor process (SessionState) and a warning says so;
   the memory mode was tested on Windows by forcing it.
   The macOS one (an AES-CBC + HMAC-SHA256 file whose key is in the Keychain) is not written; its lock file
-  (`FileShare.None`) is not tested on Mono for macOS either. Tested so far on Windows, Unity 6000.3.21f1, with a fake platform:
-  no real B2C login has been run through it.
-- **Deploy targets are not per connection yet.** The Addressables window deploys the worlds it listed for the project's
-  default connection (it refuses when that changed since), and its ticks are kept per project and connection (the old
-  machine-wide value is no longer read). `UserSettings/Virtuademy/connections.json` holds the connections used and the
-  default one. The tenant switch still writes `PlatformCredentials.asset` from the window's selected file, not from the
-  default connection's record (the two are the same tenant once the file is a connection), and the check that git ignores
-  `UserSettings/` and `PlatformCredentials.asset` is not made.
+  (`FileShare.None`) is not tested on Mono for macOS either. Tested on Windows, Unity 6000.3.21f1, with a real B2C login
+  against two Configuration-API instances.
+- **Play mode is not tied to a connection.** The tenant switch writes `PlatformCredentials.asset` from the window's
+  selected file, not from a connection's record (the default connection is the same tenant once the file is a
+  connection); how play mode picks its tenant is to be decided on its own (meta-repo ADR 0037), and the check that git ignores `UserSettings/` and `PlatformCredentials.asset` is not made.
 
 - **`TenantConfigurationClient`'s doc comment reads backwards.** It says the base class "was the
   last thing tying this package to `Virtuademy-SDK-Core`" — written when that name meant the

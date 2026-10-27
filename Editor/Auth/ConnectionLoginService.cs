@@ -307,17 +307,52 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         #region Adding a connection
 
-        /// <summary>Adds the connection a credential belongs to, with no login. Idempotent: it refreshes what the platform says.</summary>
+        /// <summary>
+        /// Adds the connection a credential belongs to, with no login, and records it as one the project uses
+        /// (<see cref="LoginOptions.BindToProject"/>). Idempotent: it refreshes what the platform says.
+        /// </summary>
         public static async Task<LoginOutcome> AddConnectionAsync(AppIdentification identification, string app, string env, LoginOptions options = null)
         {
+            options ??= new LoginOptions();
+
             try
             {
-                return await AddConnectionCoreAsync(identification, app, env, options ?? new LoginOptions());
+                LoginOutcome outcome = await AddConnectionCoreAsync(identification, app, env, options);
+
+                // Here and not in the core, which a login runs first: a login that then fails must not bind the connection
+                // or change the default connection.
+                if (outcome.Success && options.BindToProject)
+                    ProjectConnections.Use(outcome.Connection.Key, options.MakeDefault);
+
+                return outcome;
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[ConnectionLoginService] Could not add the connection: {ex.Message}");
                 return LoginOutcome.Fail("tenant-data", ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Reads a stored connection's tenant again over HMAC, with no login: its label, environment and platform version
+        /// (which an operator can change at any time, an upgrade included), and the auth configuration. Changes nothing
+        /// else of the record, its session included, and does not bind it to the project. The deploy targets check the
+        /// version rule against what this stores.
+        /// </summary>
+        public static async Task<LoginOutcome> RefreshConnectionAsync(string connectionKey)
+        {
+            ConnectionRecord record = ConnectionStore.Get(connectionKey);
+            if (record == null)
+                return LoginOutcome.Fail("tenant-data", $"There is no connection '{connectionKey}'.");
+
+            try
+            {
+                return await AddConnectionCoreAsync(record.ToAppIdentification(), record.App, record.Env, new LoginOptions());
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[ConnectionLoginService] Could not read the tenant of {record.TenantLabel} again: {ex.Message}");
+                return LoginOutcome.Fail("tenant-data", ex.Message, record);
             }
         }
 
@@ -502,6 +537,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// Adds to the store every credential of the project's configuration files that it does not hold yet:
         /// the migration of the old per-project JSON credentials (ADR 0037). Asks the platform once per
         /// credential, so it needs the network; a credential that cannot be resolved is reported, not fatal.
+        /// Every connection a file of the project stands for, new or already stored, is recorded as one the project
+        /// uses, so the Addressables window offers it as a deploy target.
         /// </summary>
         public static async Task<(int Added, int AlreadyKnown, List<string> Failures)> ImportProjectCredentialsAsync(AppConfigurationSettings settings)
         {
@@ -517,8 +554,13 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 foreach (KeyValuePair<string, AppIdentification> entry in envs)
                 {
                     AppIdentification identification = entry.Value;
-                    if (identification?.Credential == null || ConnectionStore.FindByAppId(identification.Credential.AppId) != null)
+                    ConnectionRecord stored = identification?.Credential == null ? null : ConnectionStore.FindByAppId(identification.Credential.AppId);
+                    if (identification?.Credential == null || stored != null)
                     {
+                        // A file of the project is a connection the project uses, even when another project added it to the store.
+                        if (stored != null)
+                            ProjectConnections.Use(stored.Key, makeDefault: false);
+
                         known++;
                         continue;
                     }
