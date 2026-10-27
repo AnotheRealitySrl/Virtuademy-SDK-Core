@@ -15,7 +15,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary><c>login</c>, <c>logout</c>, <c>connections</c>, <c>whoami</c>, or <c>status</c> (both of the last two).</summary>
         public string Command;
 
-        /// <summary>A connection in the store: its key, tenant key, tenant label or <c>app/env</c>. Empty means the project's active one.</summary>
+        /// <summary>A connection in the store: its key, tenant key, tenant label or <c>app/env</c>. Empty means the project's default one.</summary>
         public string Connection;
 
         /// <summary>For <c>login</c> of a connection that is not in the store yet: the app and the environment of the project's configuration file.</summary>
@@ -76,7 +76,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                         break;
 
                     case "status":
-                        // Both answers in one: what the store holds, and the connection asked for (or the active one).
+                        // Both answers in one: what the store holds, and the connection asked for (or the default one).
                         AddConnections(result);
                         ConnectionRecord target = ResolveTarget(request, out string targetError);
                         if (target != null)
@@ -114,14 +114,14 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private static void AddConnections(ConnectionCommandResult result)
         {
-            string active = ProjectConnections.ActiveKey;
+            string defaultConnection = ProjectConnections.DefaultKey;
             IReadOnlyList<string> used = ProjectConnections.Used;
 
             result.Fields["connections"] = ConnectionStore.All().Select(c =>
             {
                 Dictionary<string, object> summary = c.ToSummary();
                 summary["usedByProject"] = used.Contains(c.Key, StringComparer.OrdinalIgnoreCase);
-                summary["active"] = string.Equals(c.Key, active, StringComparison.OrdinalIgnoreCase);
+                summary["default"] = string.Equals(c.Key, defaultConnection, StringComparison.OrdinalIgnoreCase);
                 return summary;
             }).ToList();
 
@@ -173,7 +173,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             {
                 result.Status = "store-not-persistent";
                 result.Error = "This OS has no encrypted connection store yet (macOS Keychain support is pending), so a login made in a batch run " +
-                               "would end with the process. Log in from the open editor (Virtuademy > Available Tenants, or a login request file).";
+                               "would end with the process. Log in from the open editor (Virtuademy > Publish Environments, or a login request file).";
                 return;
             }
 
@@ -199,23 +199,33 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             if (string.IsNullOrWhiteSpace(request.Connection) && !string.IsNullOrWhiteSpace(request.App))
             {
-                // A credential of the project's own configuration file, not in the store yet (or not named by key).
-                if (!ConnectionLoginService.TryFindProjectCredential(request.App, request.Env, out AppIdentification identification,
-                                                                     out string app, out string env, out string error))
+                // A credential of the project's own configuration file, not in the store yet (or not named by key); since the
+                // import goes into the store and leaves no file in an environment project, a connection the project uses with
+                // that app and environment.
+                if (ConnectionLoginService.TryFindProjectCredential(request.App, request.Env, out AppIdentification identification,
+                                                                    out string app, out string env, out string error))
                 {
-                    result.Status = "connection-unknown";
-                    result.Error = error;
-                    return;
+                    outcome = await ConnectionLoginService.LoginAsync(identification, app, env, options);
                 }
+                else
+                {
+                    ConnectionRecord used = FindUsedByApp(request.App, request.Env, out string usedError);
+                    if (used == null)
+                    {
+                        result.Status = "connection-unknown";
+                        result.Error = usedError ?? error;
+                        return;
+                    }
 
-                outcome = await ConnectionLoginService.LoginAsync(identification, app, env, options);
+                    outcome = await ConnectionLoginService.LoginAsync(used.Key, options);
+                }
             }
             else
             {
                 ConnectionRecord record = ResolveTarget(request, out string error);
                 if (record == null)
                 {
-                    // Nothing named and nothing active: the project's only configuration file is the way in.
+                    // Nothing named and no single connection: the project's only configuration file is the way in.
                     if (string.IsNullOrWhiteSpace(request.Connection)
                         && ConnectionLoginService.TryFindProjectCredential(null, request.Env, out AppIdentification identification,
                                                                            out string app, out string env, out _))
@@ -252,7 +262,28 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             };
         }
 
-        /// <summary>The connection a request names, or the project's active one when it names none.</summary>
+        /// <summary>
+        /// The connection the project uses whose app (the configuration file's name) and environment key are these. Null, with
+        /// <paramref name="error"/> set only when the name fits several, when there is not exactly one.
+        /// </summary>
+        private static ConnectionRecord FindUsedByApp(string app, string env, out string error)
+        {
+            error = null;
+            List<ConnectionRecord> matches = ProjectConnections.Used
+                .Select(ConnectionStore.Get)
+                .Where(r => r != null
+                            && string.Equals(r.App, app, StringComparison.OrdinalIgnoreCase)
+                            && (string.IsNullOrEmpty(env) || string.Equals(r.Env, env, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            if (matches.Count > 1)
+                error = $"The app '{app}' names {matches.Count} connections of this project: add the environment, or name one of their keys: " +
+                        string.Join(", ", matches.Select(r => r.Key)) + ".";
+
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        /// <summary>The connection a request names, or the project's only connection when it names none.</summary>
         private static ConnectionRecord ResolveTarget(ConnectionCommandRequest request, out string error)
         {
             error = null;
@@ -260,11 +291,13 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             if (!string.IsNullOrWhiteSpace(request.Connection))
                 return ConnectionStore.Find(request.Connection, out error);
 
-            ConnectionRecord active = ConnectionStore.Get(ProjectConnections.ActiveKey);
-            if (active == null)
-                error = "The project has no active connection: name one with the connection argument (see the connections command).";
+            ConnectionRecord only = ConnectionStore.Get(ProjectConnections.DefaultKey);
+            if (only == null)
+                error = ProjectConnections.UsedInStoreCount == 0
+                    ? "The project uses no connection: import a tenant's configuration file (tenant-config), or name a connection of the store with the connection argument."
+                    : $"The project uses {ProjectConnections.UsedInStoreCount} connections: name one with the connection argument (see the connections command).";
 
-            return active;
+            return only;
         }
 
         #endregion

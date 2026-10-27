@@ -21,7 +21,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         [SerializeField] private List<TextAsset> appAssets = new();
 
         [SerializeField] private AbstractAppConfigurator configurationScript;
-        [SerializeField] private BuildScriptBase buildScript;
+        // The application's build script. Nothing in this package reads it: the Virtuademy application builds from it
+        // (its BuildScriptBase), an external application with its own tools. Typed as a ScriptableObject since the build
+        // moved out of this package (meta-repo ADR 0037): the reference serialized in existing assets is kept as it is.
+        [SerializeField, Tooltip("The application's build script, read by the application's own build. The SDK does not use it.")]
+        private ScriptableObject buildScript;
 
         [SerializeField] private Tenant cachedTenant;
         [SerializeField] private string cachedAppConfigJson;
@@ -60,7 +64,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         public JObject CachedAppConfig => string.IsNullOrEmpty(cachedAppConfigJson) ? null : JObject.Parse(cachedAppConfigJson);
 
         [CreateProperty] public AbstractAppConfigurator ConfigurationScript { get => configurationScript; set => configurationScript = value; }
-        [CreateProperty] public BuildScriptBase BuildScript { get => buildScript; set => buildScript = value; }
+        [CreateProperty] public ScriptableObject BuildScript { get => buildScript; set => buildScript = value; }
 
 
         /// <summary>

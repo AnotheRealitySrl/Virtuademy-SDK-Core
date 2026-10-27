@@ -21,8 +21,10 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// Connects the project to a tenant the way "Connect the SDK to your tenant" describes it: the
     /// configuration file downloaded from the Back Office (<b>Download SDK Environments Config</b>)
     /// goes into the project, into the <b>App Assets</b> of the <see cref="AppConfigurationSettings"/>
-    /// asset, and is selected. The Available Tenants window and the command line
-    /// (<c>EnvironmentsCli tenant-config</c>) both call <see cref="Import"/>.
+    /// asset, and is selected. That is what an application needs, the tenant switch writing
+    /// <c>PlatformCredentials.asset</c> from it: the Available Tenants window calls <see cref="Import"/> through
+    /// <see cref="ConfigurationFileImport.ImportIntoProject"/>. An environment project keeps no such file: its import
+    /// goes into the connection store (<see cref="ConfigurationFileImport.ImportIntoStoreAsync"/>).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -205,6 +207,25 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 ReplacedExisting = replaced
             };
         }
+
+        /// <summary>
+        /// Reads a downloaded configuration file without importing it: its environments, checked for what a login needs.
+        /// Throws <see cref="InvalidOperationException"/> without quoting the file.
+        /// </summary>
+        internal static Dictionary<string, AppIdentification> ReadFile(string sourceFile)
+        {
+            if (string.IsNullOrWhiteSpace(sourceFile) || !File.Exists(sourceFile))
+                throw new InvalidOperationException($"There is no configuration file at '{sourceFile}'.");
+
+            return Parse(File.ReadAllText(sourceFile), sourceFile);
+        }
+
+        /// <summary>
+        /// The app name a file stands for: its name up to the first dot, without the " (1)" a browser adds to a second
+        /// download, as <see cref="AppConfigurationSettings.GetAppIdentification"/> reads it once imported.
+        /// </summary>
+        internal static string AppNameOf(string sourceFile) =>
+            Regex.Replace(Path.GetFileName(sourceFile), @"\s?\(\d+\)(?=\.[^.]+$)", "").Split('.')[0];
 
         /// <summary>
         /// The file's environments, checked for what a login needs. Throws without quoting the text:

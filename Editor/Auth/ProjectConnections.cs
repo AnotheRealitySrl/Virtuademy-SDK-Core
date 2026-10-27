@@ -16,21 +16,42 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// settings. The file names connections by key and holds no token and no secret.
     /// </summary>
     /// <remarks>
-    /// There is no "current login" any more, only the connection an operation names. The one the project
-    /// calls <see cref="ActiveKey"/> is what the window's login, the deploy and the other editor requests
-    /// that name no connection use: the one chosen in the window (a login there makes it active), or the first one this
-    /// project used. A login from the command line or a request file makes its connection active only when the
-    /// project has none (<see cref="Use"/>).
-    /// The deploy targets, and the world ticks that used to live in one machine-wide EditorPrefs value, join
-    /// this file in a later step.
+    /// There is no "current login" any more, only the connection an operation names. An editor request or a command
+    /// that names no connection uses the project's only connection, <see cref="DefaultKey"/>; with two or more there is
+    /// none, and such a request is refused: it must name its connection. Nobody chooses a default connection (that choice
+    /// was dropped on 2026-10-27, before 2026.7.0 was released). It decides neither where a deploy goes, which names its
+    /// own connections, nor play mode (the tenant switch writes <c>PlatformCredentials.asset</c> from the selected file).
+    /// <para>
+    /// The file also keeps the project's deploy targets (<see cref="TargetsOf"/>): per connection, the worlds and the
+    /// tenant level ticked in the Publish Environments window. They replace the world ticks that lived in one
+    /// machine-wide EditorPrefs value and were ticked again in any tenant and project.
+    /// </para>
     /// </remarks>
     public static class ProjectConnections
     {
+        /// <summary>
+        /// One deploy target of the project: a world of a connection, or the connection's tenant level. More per-target
+        /// choices can join it without changing the file's shape.
+        /// </summary>
+        public sealed class DeployTarget
+        {
+            public string Connection { get; set; }
+
+            /// <summary>The world, or null for the tenant level.</summary>
+            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+            public int? WorldId { get; set; }
+
+            [JsonIgnore]
+            public bool TenantLevel => WorldId == null;
+        }
+
         private sealed class Selection
         {
             public List<string> Used { get; set; } = new();
-            public string Active { get; set; }
-            public string PlayMode { get; set; }
+            public List<DeployTarget> Targets { get; set; } = new();
+
+            // The files written while a default connection could be chosen carry "Default" (earlier "Active", then
+            // "PlayMode"): nothing reads them, and the next write drops them.
         }
 
         private static readonly object gate = new();
@@ -68,44 +89,33 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// The connection the project's editor requests go to when they name none. Null when the project has
-        /// none, or the one it had was removed from the store.
+        /// The connection an editor request or a command that names no connection uses: the project's only connection in
+        /// the store. Null when the project uses none, or two or more: a request must then name its connection.
         /// </summary>
-        public static string ActiveKey
+        public static string DefaultKey
         {
             get
             {
                 lock (gate)
                 {
-                    Selection selection = Read();
-                    string key = selection.Active;
-
-                    if (string.IsNullOrEmpty(key))
-                    {
-                        List<string> existing = selection.Used.Where(k => ConnectionStore.Get(k) != null).ToList();
-                        key = existing.Count == 1 ? existing[0] : null;
-                    }
-
-                    return ConnectionStore.Get(key)?.Key;
+                    List<string> existing = Read().Used.Where(k => ConnectionStore.Get(k) != null).ToList();
+                    return existing.Count == 1 ? ConnectionStore.Get(existing[0])?.Key : null;
                 }
             }
         }
 
-        /// <summary>The connection play mode reads its tenant from. Not consumed yet.</summary>
-        public static string PlayModeKey
+        /// <summary>The connections this project uses that are in the store.</summary>
+        public static int UsedInStoreCount
         {
             get
             {
                 lock (gate)
-                    return Read().PlayMode;
+                    return Read().Used.Count(k => ConnectionStore.Get(k) != null);
             }
         }
 
-        /// <summary>
-        /// Records that the project uses <paramref name="key"/>, and makes it the active one when asked to or when the
-        /// project has no active connection yet.
-        /// </summary>
-        public static void Use(string key, bool makeActive = true)
+        /// <summary>Records that the project uses <paramref name="key"/>.</summary>
+        public static void Use(string key)
         {
             if (string.IsNullOrEmpty(key) || ConnectionStore.IsWorkerProcess)
                 return;
@@ -113,13 +123,68 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             lock (gate)
             {
                 Selection selection = Read();
-                if (!selection.Used.Contains(key, StringComparer.OrdinalIgnoreCase))
-                    selection.Used.Add(key);
+                if (selection.Used.Contains(key, StringComparer.OrdinalIgnoreCase))
+                    return;
 
-                if (makeActive || string.IsNullOrEmpty(selection.Active))
-                    selection.Active = key;
+                selection.Used.Add(key);
+                Write(selection);
+            }
+        }
 
-                selection.PlayMode ??= key;
+        /// <summary>
+        /// The project stops using <paramref name="key"/> ("Remove from project" in the Publish Environments window): it leaves
+        /// the list and its deploy targets go. The connection stays in the store, logged in or not, for the other projects.
+        /// Every view of the project's connections is told.
+        /// </summary>
+        public static void Remove(string key)
+        {
+            if (string.IsNullOrEmpty(key) || ConnectionStore.IsWorkerProcess)
+                return;
+
+            lock (gate)
+            {
+                Selection selection = Read();
+                selection.Used.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+                selection.Targets.RemoveAll(t => string.Equals(t.Connection, key, StringComparison.OrdinalIgnoreCase));
+
+                Write(selection);
+            }
+
+            EditorLoginState.NotifyLoginChanged();
+        }
+
+        /// <summary>The deploy targets the project keeps for one connection: its ticked worlds and, when ticked, its tenant level.</summary>
+        public static IReadOnlyList<DeployTarget> TargetsOf(string connectionKey)
+        {
+            if (string.IsNullOrEmpty(connectionKey))
+                return Array.Empty<DeployTarget>();
+
+            lock (gate)
+            {
+                return Read().Targets
+                    .Where(t => string.Equals(t.Connection, connectionKey, StringComparison.OrdinalIgnoreCase))
+                    .Select(t => new DeployTarget { Connection = t.Connection, WorldId = t.WorldId })
+                    .ToList();
+            }
+        }
+
+        /// <summary>Replaces the deploy targets of one connection; the other connections' targets are kept as they are.</summary>
+        public static void SetTargets(string connectionKey, IEnumerable<int> worldIds, bool tenantLevel)
+        {
+            if (string.IsNullOrEmpty(connectionKey) || ConnectionStore.IsWorkerProcess)
+                return;
+
+            lock (gate)
+            {
+                Selection selection = Read();
+                selection.Targets.RemoveAll(t => string.Equals(t.Connection, connectionKey, StringComparison.OrdinalIgnoreCase));
+
+                foreach (int id in (worldIds ?? Enumerable.Empty<int>()).Distinct().OrderBy(id => id))
+                    selection.Targets.Add(new DeployTarget { Connection = connectionKey, WorldId = id });
+
+                if (tenantLevel)
+                    selection.Targets.Add(new DeployTarget { Connection = connectionKey });
+
                 Write(selection);
             }
         }
@@ -137,6 +202,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             try
             {
                 cache = JsonConvert.DeserializeObject<Selection>(File.ReadAllText(path, Encoding.UTF8)) ?? new Selection();
+                cache.Used ??= new List<string>();
+                cache.Targets ??= new List<DeployTarget>();
             }
             catch (Exception ex) when (ex is IOException || ex is JsonException)
             {
@@ -150,8 +217,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private static void Write(Selection selection)
         {
-            Directory.CreateDirectory(Folder);
-            ConnectionStore.WriteAtomic(FilePath, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(selection, Formatting.Indented)));
+            try
+            {
+                Directory.CreateDirectory(Folder);
+                ConnectionStore.WriteAtomic(FilePath, Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(selection, Formatting.Indented)));
+            }
+            catch
+            {
+                // The cached copy was changed in place: read the file again next time rather than trust it.
+                cache = null;
+                throw;
+            }
+
             cache = selection;
             cacheStamp = File.GetLastWriteTimeUtc(FilePath).Ticks;
         }

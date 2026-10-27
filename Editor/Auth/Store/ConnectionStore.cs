@@ -17,10 +17,16 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
     /// The per-user store of the editor's connections (ADR 0037): one file under
-    /// <c>%LOCALAPPDATA%\Virtuademy\SDK\</c>, outside every project, encrypted with DPAPI, shared by
+    /// <c>%USERPROFILE%\.virtuademy\sdk\</c>, outside every project, encrypted with DPAPI, shared by
     /// every Unity project and process of the OS user.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Why the profile folder.</b> A packaged (MSIX) app can redirect <c>%LOCALAPPDATA%</c>, <c>%APPDATA%</c> and
+    /// <c>HKCU</c> for the processes it starts: a command line started from such an app (the Claude desktop app, for
+    /// one) would then keep a store of its own beside the editor's, and neither would see the other's logins. The
+    /// profile folder is not redirected, and its access rights are the same.
+    /// </para>
     /// <para>
     /// <b>Writers.</b> A change takes the lock file (<see cref="FileShare.None"/>, released by the operating
     /// system if its process dies), reads the file again, changes only its own connection, raises that
@@ -83,7 +89,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         #region Where
 
         public static string Root => RootOverride
-                                     ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Virtuademy", "SDK");
+                                     ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".virtuademy", "sdk");
 
         private static string RecordsPath => Path.Combine(Root, "connections.bin");
         private static string LockPath => Path.Combine(Root, "connections.lock");

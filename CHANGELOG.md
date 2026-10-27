@@ -4,13 +4,16 @@
 
 Minor bump: additive API, plus behaviour changes an external app will notice (listed under
 Changed). The editor login API changes shape (ADR 0037, platform 2026.7.0): the members that went are named
-under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
+under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only. **Breaking** for an app that used them: the
+members listed under Removed (Configure App, `TenantConfigurationClient.UpdateAppCustomConfig`, `BuildScriptBase`) and
+the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries it.
 
 ### Added
 - **Editor logins are connections in a per-user encrypted store** (meta-repo ADR 0037, first slice). A connection is one
   tenant of one Configuration-API instance: its key is the instance's normalized base URL plus the `tenantKey` of
   `config-public`, and it holds the app credential imported from the Back Office file, the session and the MSAL account it is
-  pinned to. The store is under `%LOCALAPPDATA%\Virtuademy\SDK\`, outside every project, shared by every project and
+  pinned to. The store is under `%USERPROFILE%\.virtuademy\sdk\` (not `%LOCALAPPDATA%`, which a packaged app such as the
+  Claude desktop app can redirect for the processes it starts), outside every project, shared by every project and
   process of the OS user: `connections.bin` (DPAPI for the current user, through a P/Invoke to `crypt32`), `msal.bin` (the
   one multi-account MSAL cache, through `SetBeforeAccess`/`SetAfterAccess`, encrypted the same way), `status.json` (the
   connections with no secret, readable without Unity) and lock files (`FileShare.None`). Each record has a revision; a writer
@@ -38,26 +41,31 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 - **A token goes only to its own connection's hosts.** `EditorSessionManager` refuses (`InvalidOperationException`, nothing
   sent) a request whose host is not one of the connection's tenant APIs, and the editor tools take the connection key once per
   operation and pass it down: `EnvironmentsDeploy`, `PublishedEnvironmentsIndex`, the hot-update verifier and policy fetch
-  all take an optional `connectionKey` (null means the active one, read once at the start). The project's active connection
-  can change while a deploy runs (a selection, a login) without the deploy following it.
+  all take an optional `connectionKey` (null means the project's only connection, read once at the start). The project's
+  connections can change while a deploy runs (an import, a removal) without the deploy following them.
 - `ConnectionStore.UpdateAsync` and `LockRenewalAsync`: another process's lock is awaited with `Task.Delay`, not slept on, so
   the editor's main thread is never held up behind it (a 3 s hold: the loop ticked normally). MSAL calls that touch the cache
   run on the thread pool for the same reason. The synchronous `Update` remains for code off the main thread.
-- `LoginOptions.MakeActive` (default false): a login from the command line or a request file adds the connection to the
-  project and makes it the active one only when the project has none; the window sets it, because a click is a choice.
 - The interactive login passes the pinned account to the browser (`WithAccount`) and refuses an answer for another account
   (`LoginAccountMismatchException`, code `account-mismatch`): the browser's single sign-on cannot swap the connection's user.
   A request that joins a login in flight hears the same authorization URL.
-- `ProjectConnections` (`UserSettings/Virtuademy/connections.json`, no token and no secret): the connections the project uses,
-  its active one and the play-mode one. The play-mode one is recorded and not read yet.
+- `ProjectConnections` (`UserSettings/Virtuademy/connections.json`, no token and no secret): the connections the project
+  uses. **Nobody chooses a default connection**: an editor request or a command that names no connection uses the project's
+  only one (`DefaultKey`), and with two or more it must name its connection (the command line exits 26). It decides neither
+  where a deploy goes nor play mode. The same file keeps the project's deploy targets, per connection a
+  world or the tenant level (`ProjectConnections.DeployTarget`, `TargetsOf`, `SetTargets`), which the Publish Environments
+  window ticks. A connection added from a configuration file of the project
+  (`ConnectionLoginService.AddConnectionAsync`, the import of the project's files) counts as one the project uses; a login that
+  fails does not bind its connection. `ConnectionLoginService.RefreshConnectionAsync(key)` reads a
+  stored connection's tenant again over HMAC (label, environment, platform version), with no login.
 - `LegacyLoginMigration`: the first use of the store in a process deletes `Virtuademy_EditorLogin_Token` from EditorPrefs and
   SessionState (once per OS user, a marker in the store folder says so) and nothing else; the other nine
   `Virtuademy_EditorLogin_*` keys stay for an older SDK on the same machine and nothing reads them.
 - `TenantPublicConfig.TenantKey` and `.Environment`, from `config-public` (`tenantKey` is the connection's key, `environment`
   is for display).
 - `EditorSessionManager` methods that name the connection: `EnsureValidTokenAsync(connectionKey, ...)`,
-  `SendAuthorizedAsync(connectionKey, ...)`, `LogoutAsync(connectionKey)`; `EditorApiEndpoint.ApplicationApiUrlOf(connectionKey)`;
-  `EditorLoginState.ActiveConnectionKey`.
+  `SendAuthorizedAsync(connectionKey, ...)`, `LogoutAsync(connectionKey)`, `DescribeSession(ConnectionRecord, out bool)`;
+  `EditorApiEndpoint.ApplicationApiUrlOf(connectionKey)`; `EditorLoginState.DefaultConnectionKey`.
 - `ITokenProviderNotifications`, with the event `TokensChanged`: a token provider implements it to
   tell its clients that the tokens it handed out were cleared (sign-out) or replaced. Separate from
   `ITokenProvider`, so existing providers keep compiling.
@@ -66,10 +74,24 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 - `HttpHelper.DefaultTimeoutSeconds` (default 120) and `HttpHelper.UploadTimeoutSeconds` (default
   0, no limit).
 - `ApiResponseError.Display(long statusCode, string content)`.
+- `TenantPublicConfig.BackofficeUrl`: the tenant's Back Office address from `config-public` (`backofficeUrl`, platform
+  2026.7.0; null when the tenant has none or the Configuration-API predates the field), kept on the connection as
+  `ConnectionRecord.BackofficeUrl` at every login and refresh. The Publish Environments window of
+  `Virtuademy-SDK-Environments` opens it (meta-repo ADR 0038).
+- **`ConfigurationFileImport`: the import of the Back Office file, shared by both windows** (meta-repo ADR 0037, "Windows
+  per kind of project"). `ImportIntoStoreAsync(file, env)` puts the file's credentials into the connection store, one
+  connection per environment of the file, each recorded as one the project uses, and writes nothing to the project: the Publish Environments window and `EnvironmentsCli tenant-config` of
+  `Virtuademy-SDK-Environments` call it, for environment projects. `ImportIntoProject(file, settings)` is the application's
+  import, into the project and onto the settings asset, with the git dialog that the Available Tenants window used to hold
+  itself. `PickFile()` opens the file panel in the user's Downloads folder. Nothing logs the file's content.
+- `ProjectConnections.Remove(key)`: the project stops using a connection ("Remove from project..." in the Publish
+  Environments window), with its deploy targets; the connection stays in the store. `ProjectConnections.UsedInStoreCount`.
+- `TenantSelectionWindow.ActionsCreated` and `TenantSelectionWindow.Settings`: an application adds its own buttons beside
+  "Change config" (the Virtuademy application adds its Build button there) and reads the settings asset when one is clicked.
 
 ### Changed
 - **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only
-  view of the project's active connection: nothing is kept in SessionState or EditorPrefs any more (the token sat in clear text
+  view of the project's default connection: nothing is kept in SessionState or EditorPrefs any more (the token sat in clear text
   in the registry), and a renewal or a logout done by another process shows at once. Removed: `EditorLoginState.Set`,
   `UpdateToken`, `MarkTokenExpired` and `Clear`, and `EditorSessionManager.LoginAsync(Tenant, ...)` (use
   `ConnectionLoginService.LoginAsync`). Old sessions are not carried over: every connection needs one login.
@@ -87,10 +109,19 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
   new file is moved into place instead of being deleted.
 - **The project's old `Library/Virtuademy/Auth/msal_*.bin` are deleted** the first time the store is used in the project: they
   held a refresh token in clear text and nothing reads them. A request file's `resultFile` must lie inside the requests folder.
-- **Available Tenants window**: the login button calls `ConnectionLoginService`. Selecting a file whose credential already
-  is a connection makes it the project's active one. On first open in an editor session it adds the project's credentials to the
-  store (one request to the platform per credential not yet there). The mismatch warning no longer says that logging in
-  switches the session: it adds a connection and the other stays logged in.
+- **Available Tenants is the tenant switch only** (behaviour change; meta-repo ADR 0037, "Windows per kind of project"). It
+  lists the configuration files, selects one and applies it with **Change config** (the button was labelled "Configure App"),
+  and imports a file into the project (`ConfigurationFileImport.ImportIntoProject`). It has no login, logout, session label or
+  mismatch warning any more, no Build button and no App configuration button: the editor logs in only to publish
+  environments, in the Publish Environments window of `Virtuademy-SDK-Environments`, which also took over the move of the
+  project's old configuration files into the store. A selection no longer changes the project's connections. Its
+  menu, `Virtuademy/Available Tenants`, is compiled only where the window has a job: not in a project that has
+  `Virtuademy-SDK-Environments` installed (an environment project; `versionDefines` sets `VIRTUADEMY_SDK_ENVIRONMENTS`),
+  unless the project defines `VIRTUADEMY_APPLICATION`, as the Virtuademy application does. The class stays public in every
+  project, so code that opens it keeps compiling.
+- **`AppConfigurationSettings.BuildScript` is a `ScriptableObject`** (was `BuildScriptBase`, which moved to the application).
+  Nothing in the package reads it; the reference serialized in existing settings assets is kept.
+- The messages that asked for a login name **Virtuademy > Publish Environments** instead of Available Tenants.
 - **Requests created by `HttpHelper.CreateHttpRequest` time out after 120 s** (`UnityWebRequest.timeout`,
   which bounds the whole request). They had no timeout. Uploads (`RawBytes`, `MultipartFormData`)
   keep none. A request that legitimately takes longer needs `timeout` set on it, or the default
@@ -109,13 +140,19 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
   when a failed response's body was not JSON (the HTML page of a 502 from a proxy or gateway) or
   was `null`: the caller got an exception instead of a failed response. The body is now parsed
   safely and logged as an excerpt when it is not a problem-details object.
-- **Selecting another configuration in Available Tenants left the Addressables window on the previous connection**
-  (its login, worlds and ticks): the window refreshed only itself. It now raises `EditorLoginState.OnLoginStateChanged`,
-  which every window that shows the active connection listens to. A deploy started there was already refused, because the
-  connection had changed since its worlds were listed.
 - **The session label showed the time without the date** ("session until 12:20" for a session that ends in a week), so a
   valid session read as one about to expire. The labels and the login and renewal logs now add the day and month when
   the moment is not today ("session until 2 Nov 12:20"; `EditorSessionManager.FormatLocal`).
+
+### Removed
+- **Configure App** (meta-repo ADR 0037, "Windows per kind of project"): `AppConfigurationWindow`, its UXML and its button
+  in Available Tenants, and the public `TenantConfigurationClient.UpdateAppCustomConfig`. It had not worked since
+  2026-04-01: it sent an HMAC-signed `PUT /manage/apps/config/custom`, a route Configuration-API dropped that day.
+  Application configuration is changed in the Configuration Portal (meta-repo ADR 0008). `GetAppCustomConfig`, which the
+  tenant switch reads, stays.
+- **`BuildScriptBase`** and the Build button of Available Tenants moved to the Virtuademy application, their only user
+  (the script kept its GUID there, so its assets still resolve). An external application is built with its developer's own
+  tools. `AbstractAppConfigurator` stays: "Change config" runs it to apply an application's product name and theme.
 
 ## v0.3.0
 

@@ -11,8 +11,6 @@ MonoImporter:
       type: 3}
   - envVisualTree: {fileID: 9197481963319205126, guid: c7abbd63207ce9b4582a95510338b887,
       type: 3}
-  - appConfigurationVisualTree: {instanceID: 0}
-  - tenantConfigurationSystem: {instanceID: 0}
   executionOrder: 0
   icon: {instanceID: 0}
   userData: 

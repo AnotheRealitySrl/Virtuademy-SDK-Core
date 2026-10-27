@@ -18,6 +18,12 @@
     ],
     "autoReferenced": true,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.anotherealitysrl.virtuademy-sdk-environments",
+            "expression": "",
+            "define": "VIRTUADEMY_SDK_ENVIRONMENTS"
+        }
+    ],
     "noEngineReferences": false
 }

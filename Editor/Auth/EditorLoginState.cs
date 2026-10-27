@@ -5,16 +5,16 @@ using System;
 namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
-    /// What the editor knows about the login of the project's active connection
-    /// (<see cref="ProjectConnections.ActiveKey"/>), read from the per-user <see cref="ConnectionStore"/>.
+    /// What the editor knows about the login of the project's default connection
+    /// (<see cref="ProjectConnections.DefaultKey"/>), read from the per-user <see cref="ConnectionStore"/>.
     /// Nothing is kept in SessionState or EditorPrefs any more, and the token is never held here: every
     /// read goes to the store, so a renewal or a logout done by another process shows at once.
     /// </summary>
     /// <remarks>
-    /// This is the view the window, the deploy and the other editor tools were written against, kept so they
-    /// keep working with the project's connection. New code names its connection and reads
-    /// <see cref="ConnectionStore.Get"/>. Who writes the session is <see cref="ConnectionLoginService"/> and
-    /// <see cref="EditorSessionManager"/>, nothing else.
+    /// This is the view the editor tools of the single-login SDK were written against, kept so they
+    /// keep working with the project's default connection. It does not say where a deploy goes: a deploy names its
+    /// connections. New code names its connection and reads <see cref="ConnectionStore.Get"/>. Who writes the session
+    /// is <see cref="ConnectionLoginService"/> and <see cref="EditorSessionManager"/>, nothing else.
     /// </remarks>
     public static class EditorLoginState
     {
@@ -25,10 +25,10 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// </summary>
         public static readonly TimeSpan ExpiryMargin = TimeSpan.FromMinutes(2);
 
-        /// <summary>The key of the connection this view reads, or null when the project has none.</summary>
-        public static string ActiveConnectionKey => ProjectConnections.ActiveKey;
+        /// <summary>The key of the connection this view reads, the default one, or null when the project has none.</summary>
+        public static string DefaultConnectionKey => ProjectConnections.DefaultKey;
 
-        private static ConnectionRecord Active => ConnectionStore.Get(ProjectConnections.ActiveKey);
+        private static ConnectionRecord Active => ConnectionStore.Get(ProjectConnections.DefaultKey);
 
         public static string BearerToken => Active?.Token ?? "";
 
@@ -100,7 +100,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         public static bool IsLoggedIn => HasSession;
 
         /// <summary>
-        /// Checks whether the given app/env pair is the one the active connection was made from and is logged in.
+        /// Checks whether the given app/env pair is the one the default connection was made from and is logged in.
         /// </summary>
         public static bool IsLoggedInto(string app, string env)
         {
@@ -112,7 +112,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 && active.Env == env;
         }
 
-        /// <summary>The user logged in or out, or the project's active connection changed.</summary>
+        /// <summary>The user logged in or out of a connection, or the project's default connection changed.</summary>
         public static event Action OnLoginStateChanged;
 
         /// <summary>

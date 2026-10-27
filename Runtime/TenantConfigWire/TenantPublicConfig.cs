@@ -24,6 +24,7 @@ namespace Virtuademy.SDK.TenantConfiguration
         [SerializeField] private string platformVersion;
         [SerializeField] private int? tenantKey;
         [SerializeField] private string environment;
+        [SerializeField] private string backofficeUrl;
 
         /// <summary>
         /// Languages this tenant supports, in order of preference. First
@@ -53,5 +54,12 @@ namespace Virtuademy.SDK.TenantConfiguration
         /// <c>Production</c>). For display only: operators can edit it, so it never identifies anything.
         /// </summary>
         public string Environment => string.IsNullOrWhiteSpace(environment) ? null : environment;
+
+        /// <summary>
+        /// The tenant's Back Office address (<c>ctn_config.backofficeUrl</c>), an absolute http(s) URL the
+        /// Configuration-API has already normalized. Null when the tenant has none, or when the
+        /// Configuration-API predates the field (2026.7.0): the editor then shows no Back Office button.
+        /// </summary>
+        public string BackofficeUrl => string.IsNullOrWhiteSpace(backofficeUrl) ? null : backofficeUrl.Trim();
     }
 }

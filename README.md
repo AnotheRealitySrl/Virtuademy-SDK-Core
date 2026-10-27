@@ -104,23 +104,39 @@ statically (`IsInstalled`); editor tooling with no application around it constru
 ### `Virtuademy.SDK.Core.Editor`
 
 The tenant-switch tooling, and the package's only menu item, `Virtuademy/Available Tenants` →
-`TenantSelectionWindow`. Beside it: `AppConfigurationWindow` + `AppConfigurationSettings`,
+`TenantSelectionWindow`: which tenant and environment an application is built for. It lists the configuration
+files, selects one and applies it with **Change config**; it does no login (meta-repo ADR 0037, "Windows per kind of
+project": the editor logs in only to publish environments, in the Publish Environments window of
+`Virtuademy-SDK-Environments`). Its menu is compiled where it has a job, in an application: not in a project with
+`Virtuademy-SDK-Environments` installed (an environment project, whose play mode does not call the platform;
+`versionDefines` sets `VIRTUADEMY_SDK_ENVIRONMENTS`), unless the project defines `VIRTUADEMY_APPLICATION`, as the
+Virtuademy application does. An application adds its own buttons beside Change config through
+`TenantSelectionWindow.ActionsCreated` (the Virtuademy application's Build button); an external application is built
+with its developer's own tools. Beside the window: `AppConfigurationSettings`,
 `TenantSwitch.Apply` (read the tenant the selected app belongs to, then write the two generated
-assets) and `PlatformConfigWriter`. `TenantSwitch` is what a project *without* an
+assets) and `PlatformConfigWriter`. Application configuration is changed in the Configuration Portal, not here. `TenantSwitch` is what a project *without* an
 application-specific configurator needs — which is every external application, for which the window
 used to offer a tenant, accept a selection, and write nothing. An application with its own
 configurator calls into it rather than repeating the flow.
 
-`AppConfigurationImporter.Import` connects a project to a tenant the way the docs describe it by hand: the
-file downloaded from the Back Office goes into the project (`Assets/Editor/TenantConfiguration`, next to the
-settings asset), into the App Assets of the settings asset, and is selected. The file holds the app's secret, so
-the import refuses (`SecretNotIgnoredException`) when git does not ignore that folder, unless the caller passes
-`allowTracked`. The window's **Import configuration file...** button and the command line
-(`EnvironmentsCli tenant-config`, in `Virtuademy-SDK-Environments`) both call it. The file holds the app's
-secret: nothing logs its content.
+`ConfigurationFileImport` is the import of the file the Back Office downloads, shared by both windows; where the
+credential goes depends on the kind of project:
 
-Three `ScriptableObject` bases an application extends: `BuildScriptBase`, `AbstractAppConfigurator`,
-`AbstractPlatformSettings`.
+- an **environment project** (the Publish Environments window, `EnvironmentsCli tenant-config`):
+  `ImportIntoStoreAsync` puts it into the connection store only, one connection per environment of the file, each one the
+  project uses. No file is written to the project. It needs the network,
+  because a connection is named by the tenant key the platform gives.
+- an **application** (Available Tenants' **Import configuration file...**): `ImportIntoProject` calls
+  `AppConfigurationImporter.Import`, and the file goes into the project (`Assets/Editor/TenantConfiguration`, next to the
+  settings asset), into the App Assets of the settings asset, and is selected: the tenant switch writes
+  `PlatformCredentials.asset` from it. The file holds the app's secret, so the import refuses
+  (`SecretNotIgnoredException`) when git does not ignore that folder, and a dialog offers "Import anyway".
+
+The file holds the app's secret: nothing logs its content.
+
+Two `ScriptableObject` bases an application extends: `AbstractAppConfigurator` ("Change config" runs it to apply the
+application's own settings) and `AbstractPlatformSettings`. `AppConfigurationSettings.BuildScript` is a plain
+`ScriptableObject` reference the package does not read: the Virtuademy application keeps its build script there.
 
 `AndroidLaunchSchemeInjector` is an `IPostGenerateGradleAndroidProject` that writes the launch scheme into the
 generated Gradle project.
@@ -135,7 +151,9 @@ because every Configuration-API instance has its own Platform DB. A credential w
 `tenantKey` (a platform-admin app) cannot become a connection.
 
 The connections live in one store per OS user, **outside every project**, shared by every project and Unity process of
-that user: `%LOCALAPPDATA%\Virtuademy\SDK\`.
+that user: `%USERPROFILE%\.virtuademy\sdk\`. Not `%LOCALAPPDATA%`: a packaged (MSIX) app can redirect that folder,
+`%APPDATA%` and `HKCU` for the processes it starts, so a command line started from such an app (the Claude desktop app,
+for one) would keep a store of its own beside the editor's. The profile folder is not redirected.
 
 | File | Holds |
 |---|---|
@@ -160,22 +178,29 @@ Logout drops the connection's token and removes its MSAL account only when no ot
 account.
 
 A project says which connections it uses in `UserSettings/Virtuademy/connections.json` (`ProjectConnections`: no token
-and no secret, keys only). Its **active** connection is the one the window, the deploy and the other editor requests that
-name no connection go to: `EditorLoginState` is the view of it, and `EditorApiEndpoint` takes the Application API address from
-the tenant that connection reported at login, never from the project's `PlatformEndpoints` asset. `EditorSessionManager`
-renews and sends on any connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it means the active one.
+and no secret, keys only). Nobody chooses a default connection: an editor request or a command that names no connection
+uses the project's only one (`ProjectConnections.DefaultKey`), and with two or more it has to name its connection.
+**Remove from project...**, in Virtuademy > Publish Environments, drops a connection from the list (`ProjectConnections.Remove`).
+That implicit connection does not decide play mode: the tenant switch writes `PlatformCredentials.asset` from the selected file. `EditorLoginState` is the view of it. It does not decide where a deploy goes: the Publish Environments window and the
+command line name their connections. `EditorApiEndpoint` takes the Application API address from the tenant a connection
+reported at login, never from the project's `PlatformEndpoints` asset. `EditorSessionManager` renews and sends on any
+connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it means the project's only one.
 **An operation takes its connection once, at the start, and passes the key down** (the deploy, the published-environments
-index, the script verification all do): the active connection can change while it runs, and the token of a connection is
+index, the script verification all do): the project's connections can change while it runs, and the token of a connection is
 sent only to the hosts of its own tenant (anything else is refused before it is sent). Logins from the command line and
-request files make the connection active only when the project has none. In
+request files, like an import, add their connection to the project. The same file keeps the project's
+deploy targets: per connection, the worlds and the tenant level ticked in the Publish Environments window
+(`ProjectConnections.TargetsOf`, `SetTargets`). Every connection a configuration file of the project stands for counts as
+one the project uses, logged in or not. In
 batch mode a session is renewed silently or not at all (`EditorSessionManager.InteractiveLoginAllowed` is false): the `login`
 command is how a browser is asked for.
 
 The first use of the store in a process runs the one-time migration of the old per-machine login (`LegacyLoginMigration`):
 it deletes `Virtuademy_EditorLogin_Token` from EditorPrefs, where the token sat in clear text, and nothing else; the other nine
 `Virtuademy_EditorLogin_*` keys stay for an older SDK on the same machine, and nothing reads them. The credentials of the
-project's own configuration files go into the store the first time the Available Tenants window opens in an editor
+project's own configuration files go into the store the first time the Publish Environments window opens in an editor
 session (`ImportProjectCredentialsAsync`, which asks the platform once per credential), or at the first `login -vdApp`.
+The files are left in the project: an environment project no longer needs them.
 Each connection then needs one login.
 
 **From the command line and a script.** `EnvironmentsCli` (in `Virtuademy-SDK-Environments`) has `login`, `logout`,
@@ -216,13 +241,11 @@ window is unfocused):
   with DPAPI, so on Windows only. Elsewhere the connections live in the editor process (SessionState) and a warning says so;
   the memory mode was tested on Windows by forcing it.
   The macOS one (an AES-CBC + HMAC-SHA256 file whose key is in the Keychain) is not written; its lock file
-  (`FileShare.None`) is not tested on Mono for macOS either. Tested so far on Windows, Unity 6000.3.21f1, with a fake platform:
-  no real B2C login has been run through it.
-- **Deploy targets are not per connection yet.** The Addressables window deploys the worlds it listed for the project's
-  active connection (it refuses when that changed since), and its ticks are kept per project and connection (the old
-  machine-wide value is no longer read). `UserSettings/Virtuademy/connections.json` holds the connections used, the active one and the play-mode
-  one; the play-mode one is recorded and not read yet (the tenant switch still writes `PlatformCredentials.asset` from the
-  window's selected file), and the check that git ignores `UserSettings/` and `PlatformCredentials.asset` is not made.
+  (`FileShare.None`) is not tested on Mono for macOS either. Tested on Windows, Unity 6000.3.21f1, with a real B2C login
+  against two Configuration-API instances.
+- **Play mode is not tied to a connection.** The tenant switch writes `PlatformCredentials.asset` from the window's
+  selected file, not from a connection's record (the default connection is the same tenant once the file is a
+  connection); how play mode picks its tenant is to be decided on its own (meta-repo ADR 0037), and the check that git ignores `UserSettings/` and `PlatformCredentials.asset` is not made.
 
 - **`TenantConfigurationClient`'s doc comment reads backwards.** It says the base class "was the
   last thing tying this package to `Virtuademy-SDK-Core`" — written when that name meant the
