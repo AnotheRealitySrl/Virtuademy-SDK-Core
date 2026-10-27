@@ -74,6 +74,10 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 - `HttpHelper.DefaultTimeoutSeconds` (default 120) and `HttpHelper.UploadTimeoutSeconds` (default
   0, no limit).
 - `ApiResponseError.Display(long statusCode, string content)`.
+- `TenantPublicConfig.BackofficeUrl`: the tenant's Back Office address from `config-public` (`backofficeUrl`, platform
+  2026.7.0; null when the tenant has none or the Configuration-API predates the field), kept on the connection as
+  `ConnectionRecord.BackofficeUrl` at every login and refresh. The Addressables management window of
+  `Virtuademy-SDK-Environments` opens it (meta-repo ADR 0038).
 
 ### Changed
 - **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only

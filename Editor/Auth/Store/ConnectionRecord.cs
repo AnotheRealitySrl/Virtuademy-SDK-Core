@@ -40,6 +40,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary>The platform version the tenant was pinned to when the connection was last resolved.</summary>
         public string PlatformVersion { get; set; }
 
+        /// <summary>The tenant's Back Office address, from <c>config-public</c>; null when the tenant gives none.</summary>
+        public string BackofficeUrl { get; set; }
+
         /// <summary>The app name of the imported file (its name up to the first dot).</summary>
         public string App { get; set; }
 

@@ -377,6 +377,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 r.TenantLabel = resolved.Tenant.Label;
                 r.Environment = resolved.Public.Environment ?? resolved.Tenant.Env.ToString();
                 r.PlatformVersion = resolved.Public.PlatformVersion;
+                r.BackofficeUrl = resolved.Public.BackofficeUrl;
                 r.App = app ?? r.App;
                 r.Env = env ?? r.Env;
                 r.AppId = identification.Credential.AppId.ToString();
