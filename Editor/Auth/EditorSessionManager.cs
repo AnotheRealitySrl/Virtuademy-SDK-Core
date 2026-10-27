@@ -76,7 +76,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             ConnectionRecord record = ConnectionStore.Get(connectionKey);
             if (record == null || !record.HasSession)
             {
-                Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Virtuademy / Available Tenants'.");
+                Debug.LogError("[EditorSessionManager] Not logged in. Log in via 'Virtuademy / Publish Environments'.");
                 return Task.FromResult(false);
             }
 
@@ -260,7 +260,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             {
                 // The auth config and client id needed to talk to Azure were never written down.
                 Debug.LogError("[EditorSessionManager] The stored session cannot be renewed automatically. " +
-                               "Log in again via 'Virtuademy / Available Tenants'.");
+                               "Log in again via 'Virtuademy / Publish Environments'.");
                 return false;
             }
 

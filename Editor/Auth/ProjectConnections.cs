@@ -16,16 +16,14 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// settings. The file names connections by key and holds no token and no secret.
     /// </summary>
     /// <remarks>
-    /// There is no "current login" any more, only the connection an operation names. The one the project
-    /// calls <see cref="DefaultKey"/> is what an editor request or a command that names no connection falls back to,
-    /// and the one the Available Tenants window shows and "Configure App" uses. It decides neither where a deploy goes,
-    /// which names its own connections, nor play mode (the tenant switch writes <c>PlatformCredentials.asset</c> from
-    /// the selected file). It is chosen in the Available Tenants window (a selection
-    /// or a login there makes it the default one). A login from the command line or a request file makes its
-    /// connection the default one only when the project has none (<see cref="Use"/>).
+    /// There is no "current login" any more, only the connection an operation names. An editor request or a command
+    /// that names no connection uses the project's only connection, <see cref="DefaultKey"/>; with two or more there is
+    /// none, and such a request is refused: it must name its connection. Nobody chooses a default connection (that choice
+    /// was dropped on 2026-10-27, before 2026.7.0 was released). It decides neither where a deploy goes, which names its
+    /// own connections, nor play mode (the tenant switch writes <c>PlatformCredentials.asset</c> from the selected file).
     /// <para>
     /// The file also keeps the project's deploy targets (<see cref="TargetsOf"/>): per connection, the worlds and the
-    /// tenant level ticked in the Addressables management window. They replace the world ticks that lived in one
+    /// tenant level ticked in the Publish Environments window. They replace the world ticks that lived in one
     /// machine-wide EditorPrefs value and were ticked again in any tenant and project.
     /// </para>
     /// </remarks>
@@ -50,19 +48,10 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private sealed class Selection
         {
             public List<string> Used { get; set; } = new();
-            public string Default { get; set; }
             public List<DeployTarget> Targets { get; set; } = new();
 
-            /// <summary>
-            /// Read only: what the first implementation called the "active connection" and wrote here. It was the one the
-            /// window chose, so a file that has it takes it as its default connection, and the next write drops it.
-            /// </summary>
-            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-            public string Active { get; set; }
-
-            /// <summary>Read only: the name the default connection had in this file while it was called the play-mode connection.</summary>
-            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
-            public string PlayMode { get; set; }
+            // The files written while a default connection could be chosen carry "Default" (earlier "Active", then
+            // "PlayMode"): nothing reads them, and the next write drops them.
         }
 
         private static readonly object gate = new();
@@ -100,9 +89,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// The project's default connection: the one an editor request or a command that names no connection falls back
-        /// to, and the one the Available Tenants window shows and "Configure App" uses. When none was chosen and the project uses exactly one connection of
-        /// the store, that one. Null when the project has none, or the one it had was removed from the store.
+        /// The connection an editor request or a command that names no connection uses: the project's only connection in
+        /// the store. Null when the project uses none, or two or more: a request must then name its connection.
         /// </summary>
         public static string DefaultKey
         {
@@ -110,25 +98,24 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             {
                 lock (gate)
                 {
-                    Selection selection = Read();
-                    string key = selection.Default;
-
-                    if (string.IsNullOrEmpty(key))
-                    {
-                        List<string> existing = selection.Used.Where(k => ConnectionStore.Get(k) != null).ToList();
-                        key = existing.Count == 1 ? existing[0] : null;
-                    }
-
-                    return ConnectionStore.Get(key)?.Key;
+                    List<string> existing = Read().Used.Where(k => ConnectionStore.Get(k) != null).ToList();
+                    return existing.Count == 1 ? ConnectionStore.Get(existing[0])?.Key : null;
                 }
             }
         }
 
-        /// <summary>
-        /// Records that the project uses <paramref name="key"/>, and makes it the default connection when asked to or when
-        /// the project has none yet.
-        /// </summary>
-        public static void Use(string key, bool makeDefault = true)
+        /// <summary>The connections this project uses that are in the store.</summary>
+        public static int UsedInStoreCount
+        {
+            get
+            {
+                lock (gate)
+                    return Read().Used.Count(k => ConnectionStore.Get(k) != null);
+            }
+        }
+
+        /// <summary>Records that the project uses <paramref name="key"/>.</summary>
+        public static void Use(string key)
         {
             if (string.IsNullOrEmpty(key) || ConnectionStore.IsWorkerProcess)
                 return;
@@ -136,14 +123,34 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             lock (gate)
             {
                 Selection selection = Read();
-                if (!selection.Used.Contains(key, StringComparer.OrdinalIgnoreCase))
-                    selection.Used.Add(key);
+                if (selection.Used.Contains(key, StringComparer.OrdinalIgnoreCase))
+                    return;
 
-                if (makeDefault || string.IsNullOrEmpty(selection.Default))
-                    selection.Default = key;
+                selection.Used.Add(key);
+                Write(selection);
+            }
+        }
+
+        /// <summary>
+        /// The project stops using <paramref name="key"/> ("Remove from project" in the Publish Environments window): it leaves
+        /// the list and its deploy targets go. The connection stays in the store, logged in or not, for the other projects.
+        /// Every view of the project's connections is told.
+        /// </summary>
+        public static void Remove(string key)
+        {
+            if (string.IsNullOrEmpty(key) || ConnectionStore.IsWorkerProcess)
+                return;
+
+            lock (gate)
+            {
+                Selection selection = Read();
+                selection.Used.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+                selection.Targets.RemoveAll(t => string.Equals(t.Connection, key, StringComparison.OrdinalIgnoreCase));
 
                 Write(selection);
             }
+
+            EditorLoginState.NotifyLoginChanged();
         }
 
         /// <summary>The deploy targets the project keeps for one connection: its ticked worlds and, when ticked, its tenant level.</summary>
@@ -197,12 +204,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 cache = JsonConvert.DeserializeObject<Selection>(File.ReadAllText(path, Encoding.UTF8)) ?? new Selection();
                 cache.Used ??= new List<string>();
                 cache.Targets ??= new List<DeployTarget>();
-
-                // Older files of this change: the window's choice was Active, later PlayMode.
-                if (string.IsNullOrEmpty(cache.Default))
-                    cache.Default = !string.IsNullOrEmpty(cache.Active) ? cache.Active : cache.PlayMode;
-                cache.Active = null;
-                cache.PlayMode = null;
             }
             catch (Exception ex) when (ex is IOException || ex is JsonException)
             {

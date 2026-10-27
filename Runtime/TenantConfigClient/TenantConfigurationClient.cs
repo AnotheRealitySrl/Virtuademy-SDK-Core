@@ -323,8 +323,8 @@ namespace Virtuademy.SDK.TenantConfiguration
         // tenant-configuration bootstrap, AppConfig stays null and AppManager blocks
         // access with MetaverseOffline.
         //
-        // The parameter is optional so the editor tooling (TenantSelectionWindow,
-        // AppConfigurationWindow, AppConfiguratorScriptBase) keeps compiling
+        // The parameter is optional so the editor tooling (TenantSwitch,
+        // the editor login, AppConfiguratorScriptBase) keeps compiling
         // unchanged: it runs on a developer machine, where the local clock is the
         // right thing to sign with.
 
@@ -390,18 +390,6 @@ namespace Virtuademy.SDK.TenantConfiguration
             await request.SendWebRequest();
 
             return new ApiResponse<List<ApiEndpoint>>(request.responseCode, request.error, request.downloadHandler.text);
-        }
-
-        public static async Task<ApiResponse> UpdateAppCustomConfig(AppIdentification apiConfig, string config, TimeSpan? serverTimeOffset = null)
-        {
-            using UnityWebRequest request = ApiHelper.BuildRequest(
-                UnityWebRequest.kHttpVerbPUT, "manage/apps/config/custom", apiConfig,
-                body: config,
-                authentication: EAuthentication.Hmac,
-                serverTimeOffset: serverTimeOffset);
-            await request.SendWebRequest();
-
-            return new ApiResponse(request.responseCode, request.error, request.downloadHandler.text);
         }
 
         #endregion

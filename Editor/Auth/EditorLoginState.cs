@@ -11,7 +11,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// read goes to the store, so a renewal or a logout done by another process shows at once.
     /// </summary>
     /// <remarks>
-    /// This is the view the Available Tenants window and the other editor tools were written against, kept so they
+    /// This is the view the editor tools of the single-login SDK were written against, kept so they
     /// keep working with the project's default connection. It does not say where a deploy goes: a deploy names its
     /// connections. New code names its connection and reads <see cref="ConnectionStore.Get"/>. Who writes the session
     /// is <see cref="ConnectionLoginService"/> and <see cref="EditorSessionManager"/>, nothing else.

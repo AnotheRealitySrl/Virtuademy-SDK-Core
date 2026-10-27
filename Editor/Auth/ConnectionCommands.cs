@@ -173,7 +173,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             {
                 result.Status = "store-not-persistent";
                 result.Error = "This OS has no encrypted connection store yet (macOS Keychain support is pending), so a login made in a batch run " +
-                               "would end with the process. Log in from the open editor (Virtuademy > Available Tenants, or a login request file).";
+                               "would end with the process. Log in from the open editor (Virtuademy > Publish Environments, or a login request file).";
                 return;
             }
 
@@ -199,23 +199,33 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             if (string.IsNullOrWhiteSpace(request.Connection) && !string.IsNullOrWhiteSpace(request.App))
             {
-                // A credential of the project's own configuration file, not in the store yet (or not named by key).
-                if (!ConnectionLoginService.TryFindProjectCredential(request.App, request.Env, out AppIdentification identification,
-                                                                     out string app, out string env, out string error))
+                // A credential of the project's own configuration file, not in the store yet (or not named by key); since the
+                // import goes into the store and leaves no file in an environment project, a connection the project uses with
+                // that app and environment.
+                if (ConnectionLoginService.TryFindProjectCredential(request.App, request.Env, out AppIdentification identification,
+                                                                    out string app, out string env, out string error))
                 {
-                    result.Status = "connection-unknown";
-                    result.Error = error;
-                    return;
+                    outcome = await ConnectionLoginService.LoginAsync(identification, app, env, options);
                 }
+                else
+                {
+                    ConnectionRecord used = FindUsedByApp(request.App, request.Env, out string usedError);
+                    if (used == null)
+                    {
+                        result.Status = "connection-unknown";
+                        result.Error = usedError ?? error;
+                        return;
+                    }
 
-                outcome = await ConnectionLoginService.LoginAsync(identification, app, env, options);
+                    outcome = await ConnectionLoginService.LoginAsync(used.Key, options);
+                }
             }
             else
             {
                 ConnectionRecord record = ResolveTarget(request, out string error);
                 if (record == null)
                 {
-                    // Nothing named and no default connection: the project's only configuration file is the way in.
+                    // Nothing named and no single connection: the project's only configuration file is the way in.
                     if (string.IsNullOrWhiteSpace(request.Connection)
                         && ConnectionLoginService.TryFindProjectCredential(null, request.Env, out AppIdentification identification,
                                                                            out string app, out string env, out _))
@@ -252,7 +262,28 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             };
         }
 
-        /// <summary>The connection a request names, or the project's default one when it names none.</summary>
+        /// <summary>
+        /// The connection the project uses whose app (the configuration file's name) and environment key are these. Null, with
+        /// <paramref name="error"/> set only when the name fits several, when there is not exactly one.
+        /// </summary>
+        private static ConnectionRecord FindUsedByApp(string app, string env, out string error)
+        {
+            error = null;
+            List<ConnectionRecord> matches = ProjectConnections.Used
+                .Select(ConnectionStore.Get)
+                .Where(r => r != null
+                            && string.Equals(r.App, app, StringComparison.OrdinalIgnoreCase)
+                            && (string.IsNullOrEmpty(env) || string.Equals(r.Env, env, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            if (matches.Count > 1)
+                error = $"The app '{app}' names {matches.Count} connections of this project: add the environment, or name one of their keys: " +
+                        string.Join(", ", matches.Select(r => r.Key)) + ".";
+
+            return matches.Count == 1 ? matches[0] : null;
+        }
+
+        /// <summary>The connection a request names, or the project's only connection when it names none.</summary>
         private static ConnectionRecord ResolveTarget(ConnectionCommandRequest request, out string error)
         {
             error = null;
@@ -260,11 +291,13 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             if (!string.IsNullOrWhiteSpace(request.Connection))
                 return ConnectionStore.Find(request.Connection, out error);
 
-            ConnectionRecord defaultConnection = ConnectionStore.Get(ProjectConnections.DefaultKey);
-            if (defaultConnection == null)
-                error = "The project has no default connection: name one with the connection argument (see the connections command).";
+            ConnectionRecord only = ConnectionStore.Get(ProjectConnections.DefaultKey);
+            if (only == null)
+                error = ProjectConnections.UsedInStoreCount == 0
+                    ? "The project uses no connection: import a tenant's configuration file (tenant-config), or name a connection of the store with the connection argument."
+                    : $"The project uses {ProjectConnections.UsedInStoreCount} connections: name one with the connection argument (see the connections command).";
 
-            return defaultConnection;
+            return only;
         }
 
         #endregion

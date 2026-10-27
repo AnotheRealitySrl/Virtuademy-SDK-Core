@@ -33,13 +33,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary>Record the connection as one this project uses.</summary>
         public bool BindToProject = true;
 
-        /// <summary>
-        /// Also make it the project's default connection. Off by default: a login started by a script or a request file
-        /// must not change the default connection of a project that a person is working in. A project with no
-        /// default connection takes the first one it logs into either way. The window sets it: a click is a choice.
-        /// </summary>
-        public bool MakeDefault;
-
         public CancellationToken Cancellation;
 
         /// <summary>Told what the login is doing ("Fetching tenant data...", "Logging in..."), for a status label.</summary>
@@ -49,7 +42,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         {
             Interactive = Interactive,
             BindToProject = BindToProject,
-            MakeDefault = MakeDefault,
             Cancellation = Cancellation,
             OnStatus = OnStatus,
             Browser = new InteractiveLoginOptions
@@ -250,7 +242,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                     return LoginOutcome.Fail("profile-api", "The platform did not give a token for this tenant (see the Console).", record);
 
                 if (options.BindToProject)
-                    ProjectConnections.Use(key, options.MakeDefault);
+                    ProjectConnections.Use(key);
 
                 EditorLoginState.NotifyLoginChanged();
 
@@ -319,10 +311,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             {
                 LoginOutcome outcome = await AddConnectionCoreAsync(identification, app, env, options);
 
-                // Here and not in the core, which a login runs first: a login that then fails must not bind the connection
-                // or change the default connection.
+                // Here and not in the core, which a login runs first: a login that then fails must not bind the connection.
                 if (outcome.Success && options.BindToProject)
-                    ProjectConnections.Use(outcome.Connection.Key, options.MakeDefault);
+                    ProjectConnections.Use(outcome.Connection.Key);
 
                 return outcome;
             }
@@ -539,7 +530,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// the migration of the old per-project JSON credentials (ADR 0037). Asks the platform once per
         /// credential, so it needs the network; a credential that cannot be resolved is reported, not fatal.
         /// Every connection a file of the project stands for, new or already stored, is recorded as one the project
-        /// uses, so the Addressables window offers it as a deploy target.
+        /// uses, so the Publish Environments window offers it as a deploy target.
         /// </summary>
         public static async Task<(int Added, int AlreadyKnown, List<string> Failures)> ImportProjectCredentialsAsync(AppConfigurationSettings settings)
         {
@@ -560,7 +551,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                     {
                         // A file of the project is a connection the project uses, even when another project added it to the store.
                         if (stored != null)
-                            ProjectConnections.Use(stored.Key, makeDefault: false);
+                            ProjectConnections.Use(stored.Key);
 
                         known++;
                         continue;
