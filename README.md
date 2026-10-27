@@ -162,14 +162,16 @@ Logout drops the connection's token and removes its MSAL account only when no ot
 account.
 
 A project says which connections it uses in `UserSettings/Virtuademy/connections.json` (`ProjectConnections`: no token
-and no secret, keys only). Its **active** connection is the one the window, the deploy and the other editor requests that
-name no connection go to: `EditorLoginState` is the view of it, and `EditorApiEndpoint` takes the Application API address from
-the tenant that connection reported at login, never from the project's `PlatformEndpoints` asset. `EditorSessionManager`
-renews and sends on any connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it means the active one.
+and no secret, keys only). Its **default** connection is chosen in Virtuademy > Available Tenants (a selection or a login
+there makes it the default one): an editor request or a command that names no connection falls back to it, and "Configure
+App" uses it. It does not decide play mode: the tenant switch writes `PlatformCredentials.asset` from the selected file. `EditorLoginState` is the view of it. It does not decide where a deploy goes: the Addressables window and the
+command line name their connections. `EditorApiEndpoint` takes the Application API address from the tenant a connection
+reported at login, never from the project's `PlatformEndpoints` asset. `EditorSessionManager` renews and sends on any
+connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it means the default one.
 **An operation takes its connection once, at the start, and passes the key down** (the deploy, the published-environments
-index, the script verification all do): the active connection can change while it runs, and the token of a connection is
+index, the script verification all do): the default connection can change while it runs, and the token of a connection is
 sent only to the hosts of its own tenant (anything else is refused before it is sent). Logins from the command line and
-request files make the connection active only when the project has none. In
+request files make the connection the default one only when the project has none. In
 batch mode a session is renewed silently or not at all (`EditorSessionManager.InteractiveLoginAllowed` is false): the `login`
 command is how a browser is asked for.
 
@@ -221,10 +223,11 @@ window is unfocused):
   (`FileShare.None`) is not tested on Mono for macOS either. Tested so far on Windows, Unity 6000.3.21f1, with a fake platform:
   no real B2C login has been run through it.
 - **Deploy targets are not per connection yet.** The Addressables window deploys the worlds it listed for the project's
-  active connection (it refuses when that changed since), and its ticks are kept per project and connection (the old
-  machine-wide value is no longer read). `UserSettings/Virtuademy/connections.json` holds the connections used, the active one and the play-mode
-  one; the play-mode one is recorded and not read yet (the tenant switch still writes `PlatformCredentials.asset` from the
-  window's selected file), and the check that git ignores `UserSettings/` and `PlatformCredentials.asset` is not made.
+  default connection (it refuses when that changed since), and its ticks are kept per project and connection (the old
+  machine-wide value is no longer read). `UserSettings/Virtuademy/connections.json` holds the connections used and the
+  default one. The tenant switch still writes `PlatformCredentials.asset` from the window's selected file, not from the
+  default connection's record (the two are the same tenant once the file is a connection), and the check that git ignores
+  `UserSettings/` and `PlatformCredentials.asset` is not made.
 
 - **`TenantConfigurationClient`'s doc comment reads backwards.** It says the base class "was the
   last thing tying this package to `Virtuademy-SDK-Core`" — written when that name meant the

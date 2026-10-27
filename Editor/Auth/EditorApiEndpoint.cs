@@ -17,18 +17,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// project's asset cannot be the answer for a connection that is not the project's play-mode tenant. A
     /// token is sent to the host of the connection it belongs to, and to no other.
     /// <para>
-    /// The members without a connection key mean the project's active connection
-    /// (<see cref="ProjectConnections.ActiveKey"/>), which keeps the existing deploy working until its targets
-    /// name their connections.
+    /// The members without a connection key mean the project's default connection
+    /// (<see cref="ProjectConnections.DefaultKey"/>), for the callers written before every request named its
+    /// connection.
     /// </para>
     /// </remarks>
     public static class EditorApiEndpoint
     {
         /// <summary>
-        /// Base URL of the active connection's Application API, or null when the project has no connection or
+        /// Base URL of the default connection's Application API, or null when the project has no connection or
         /// its tenant reported none — callers already treat that as "cannot reach the platform".
         /// </summary>
-        public static string ApplicationApiUrl => ApplicationApiUrlOf(ProjectConnections.ActiveKey);
+        public static string ApplicationApiUrl => ApplicationApiUrlOf(ProjectConnections.DefaultKey);
 
         /// <summary>Base URL of the Application API of this connection's tenant.</summary>
         public static string ApplicationApiUrlOf(string connectionKey) =>

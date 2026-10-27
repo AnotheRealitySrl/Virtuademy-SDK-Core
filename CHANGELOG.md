@@ -39,26 +39,28 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 - **A token goes only to its own connection's hosts.** `EditorSessionManager` refuses (`InvalidOperationException`, nothing
   sent) a request whose host is not one of the connection's tenant APIs, and the editor tools take the connection key once per
   operation and pass it down: `EnvironmentsDeploy`, `PublishedEnvironmentsIndex`, the hot-update verifier and policy fetch
-  all take an optional `connectionKey` (null means the active one, read once at the start). The project's active connection
-  can change while a deploy runs (a selection, a login) without the deploy following it.
+  all take an optional `connectionKey` (null means the project's default connection, read once at the start). The default
+  connection can change while a deploy runs (a selection, a login) without the deploy following it.
 - `ConnectionStore.UpdateAsync` and `LockRenewalAsync`: another process's lock is awaited with `Task.Delay`, not slept on, so
   the editor's main thread is never held up behind it (a 3 s hold: the loop ticked normally). MSAL calls that touch the cache
   run on the thread pool for the same reason. The synchronous `Update` remains for code off the main thread.
-- `LoginOptions.MakeActive` (default false): a login from the command line or a request file adds the connection to the
-  project and makes it the active one only when the project has none; the window sets it, because a click is a choice.
+- `LoginOptions.MakeDefault` (default false): a login from the command line or a request file adds the connection to the
+  project and makes it the default one only when the project has none; the window sets it, because a click is a choice.
 - The interactive login passes the pinned account to the browser (`WithAccount`) and refuses an answer for another account
   (`LoginAccountMismatchException`, code `account-mismatch`): the browser's single sign-on cannot swap the connection's user.
   A request that joins a login in flight hears the same authorization URL.
-- `ProjectConnections` (`UserSettings/Virtuademy/connections.json`, no token and no secret): the connections the project uses,
-  its active one and the play-mode one. The play-mode one is recorded and not read yet.
+- `ProjectConnections` (`UserSettings/Virtuademy/connections.json`, no token and no secret): the connections the project uses
+  and its default connection (`DefaultKey`), chosen in Available Tenants. It is what an editor request or a command that names
+  no connection falls back to, and the one Available Tenants shows and "Configure App" uses; it decides neither where a
+  deploy goes nor play mode.
 - `LegacyLoginMigration`: the first use of the store in a process deletes `Virtuademy_EditorLogin_Token` from EditorPrefs and
   SessionState (once per OS user, a marker in the store folder says so) and nothing else; the other nine
   `Virtuademy_EditorLogin_*` keys stay for an older SDK on the same machine and nothing reads them.
 - `TenantPublicConfig.TenantKey` and `.Environment`, from `config-public` (`tenantKey` is the connection's key, `environment`
   is for display).
 - `EditorSessionManager` methods that name the connection: `EnsureValidTokenAsync(connectionKey, ...)`,
-  `SendAuthorizedAsync(connectionKey, ...)`, `LogoutAsync(connectionKey)`; `EditorApiEndpoint.ApplicationApiUrlOf(connectionKey)`;
-  `EditorLoginState.ActiveConnectionKey`.
+  `SendAuthorizedAsync(connectionKey, ...)`, `LogoutAsync(connectionKey)`, `DescribeSession(ConnectionRecord, out bool)`;
+  `EditorApiEndpoint.ApplicationApiUrlOf(connectionKey)`; `EditorLoginState.DefaultConnectionKey`.
 - `ITokenProviderNotifications`, with the event `TokensChanged`: a token provider implements it to
   tell its clients that the tokens it handed out were cleared (sign-out) or replaced. Separate from
   `ITokenProvider`, so existing providers keep compiling.
@@ -70,7 +72,7 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 
 ### Changed
 - **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only
-  view of the project's active connection: nothing is kept in SessionState or EditorPrefs any more (the token sat in clear text
+  view of the project's default connection: nothing is kept in SessionState or EditorPrefs any more (the token sat in clear text
   in the registry), and a renewal or a logout done by another process shows at once. Removed: `EditorLoginState.Set`,
   `UpdateToken`, `MarkTokenExpired` and `Clear`, and `EditorSessionManager.LoginAsync(Tenant, ...)` (use
   `ConnectionLoginService.LoginAsync`). Old sessions are not carried over: every connection needs one login.
@@ -89,7 +91,7 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
 - **The project's old `Library/Virtuademy/Auth/msal_*.bin` are deleted** the first time the store is used in the project: they
   held a refresh token in clear text and nothing reads them. A request file's `resultFile` must lie inside the requests folder.
 - **Available Tenants window**: the login button calls `ConnectionLoginService`. Selecting a file whose credential already
-  is a connection makes it the project's active one. On first open in an editor session it adds the project's credentials to the
+  is a connection makes it the project's default one. On first open in an editor session it adds the project's credentials to the
   store (one request to the platform per credential not yet there). The mismatch warning no longer says that logging in
   switches the session: it adds a connection and the other stays logged in.
 - **Requests created by `HttpHelper.CreateHttpRequest` time out after 120 s** (`UnityWebRequest.timeout`,
@@ -112,7 +114,7 @@ under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only.
   safely and logged as an excerpt when it is not a problem-details object.
 - **Selecting another configuration in Available Tenants left the Addressables window on the previous connection**
   (its login, worlds and ticks): the window refreshed only itself. It now raises `EditorLoginState.OnLoginStateChanged`,
-  which every window that shows the active connection listens to. A deploy started there was already refused, because the
+  which every window that shows the default connection listens to. A deploy started there was already refused, because the
   connection had changed since its worlds were listed.
 - **The session label showed the time without the date** ("session until 12:20" for a session that ends in a week), so a
   valid session read as one about to expire. The labels and the login and renewal logs now add the day and month when

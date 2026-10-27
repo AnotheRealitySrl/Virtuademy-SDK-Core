@@ -21,7 +21,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// Owns the editor's authenticated sessions: renews them before they expire, and replays a request once
     /// when the server rejects a token we believed was still good. A session belongs to a connection of the
     /// per-user <see cref="ConnectionStore"/>; every method has a form that names the connection, and the one
-    /// that does not uses the project's active connection (<see cref="ProjectConnections.ActiveKey"/>).
+    /// that does not uses the project's default connection (<see cref="ProjectConnections.DefaultKey"/>).
     ///
     /// Every editor tool that calls a Virtuademy API must go through
     /// <see cref="SendAuthorizedAsync(Func{HttpRequestMessage}, HttpClient, bool)"/> (or at least await
@@ -52,10 +52,10 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         public static bool InteractiveLoginAllowed => !runsInBatchMode;
 
         /// <summary>
-        /// Guarantees a usable token for the project's active connection, renewing it if needed.
+        /// Guarantees a usable token for the project's default connection, renewing it if needed.
         /// </summary>
         public static Task<bool> EnsureValidTokenAsync(bool allowInteractive = true) =>
-            EnsureValidTokenAsync(ProjectConnections.ActiveKey, allowInteractive);
+            EnsureValidTokenAsync(ProjectConnections.DefaultKey, allowInteractive);
 
         /// <summary>
         /// Guarantees a usable token for the connection, renewing it if needed. Renewal is silent whenever the
@@ -95,12 +95,12 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Sends an authenticated request on the project's active connection.
+        /// Sends an authenticated request on the project's default connection.
         /// </summary>
         public static Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory,
                                                                     HttpClient client = null,
                                                                     bool allowInteractive = true) =>
-            SendAuthorizedAsync(ProjectConnections.ActiveKey, requestFactory, client, allowInteractive);
+            SendAuthorizedAsync(ProjectConnections.DefaultKey, requestFactory, client, allowInteractive);
 
         /// <summary>
         /// Sends an authenticated request on a connection, attaching a freshly validated token.
@@ -142,10 +142,10 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Ends the project's active connection's session on both sides: the stored token and the MSAL refresh
+        /// Ends the project's default connection's session on both sides: the stored token and the MSAL refresh
         /// token (which stays when another connection uses the same account).
         /// </summary>
-        public static async Task LogoutAsync() => await LogoutAsync(ProjectConnections.ActiveKey);
+        public static async Task LogoutAsync() => await LogoutAsync(ProjectConnections.DefaultKey);
 
         public static async Task LogoutAsync(string connectionKey)
         {
@@ -186,16 +186,20 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// that hides a possible login prompt. The time shown is the one at which the label
         /// changes (<see cref="EditorLoginState.TokenUsableUntilUtc"/>), not the raw expiry.
         /// </summary>
-        public static string DescribeSession(out bool tokenValid)
+        public static string DescribeSession(out bool tokenValid) =>
+            DescribeSession(ConnectionStore.Get(ProjectConnections.DefaultKey), out tokenValid);
+
+        /// <summary>The same for one connection: the default one or any other.</summary>
+        public static string DescribeSession(ConnectionRecord record, out bool tokenValid)
         {
-            tokenValid = EditorLoginState.IsTokenValid;
-            DateTime? usableUntil = EditorLoginState.TokenUsableUntilUtc;
+            tokenValid = record?.IsTokenValid ?? false;
+            DateTime? usableUntil = record?.UsableUntilUtc;
             string time = FormatLocal(usableUntil);
 
             if (tokenValid)
                 return $" (session until {time})";
 
-            if (EditorLoginState.IsTokenRejected)
+            if (record?.TokenRejected ?? false)
                 return " - session rejected by the server, it will be renewed automatically on the next operation";
 
             return $" - session expired at {time}, it will be renewed automatically on the next operation";
@@ -207,7 +211,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             using HttpRequestMessage request = requestFactory();
 
             // A token goes only to the hosts of the tenant of the connection it belongs to: a caller that took its
-            // address from another connection (the project's active one changed under it) is stopped here.
+            // address from another connection is stopped here.
             RequireHostOf(record, request.RequestUri, connectionKey);
 
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", record?.Token);

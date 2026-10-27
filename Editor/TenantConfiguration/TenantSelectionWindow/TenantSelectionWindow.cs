@@ -388,7 +388,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 && !string.IsNullOrEmpty(appConfigurationSettings.SelectedApp)
                 && !EditorLoginState.IsLoggedInto(appConfigurationSettings.SelectedApp, appConfigurationSettings.SelectedEnv))
             {
-                tenantMismatchLabel.text = $"Warning: this project's connection is {EditorLoginState.LoggedInApp}/{EditorLoginState.LoggedInEnv}. Logging in here adds a connection and makes it the project's; the other stays logged in.";
+                tenantMismatchLabel.text = $"Warning: this project's default connection is {EditorLoginState.LoggedInApp}/{EditorLoginState.LoggedInEnv}. Logging in here adds a connection and makes it the default one; the other stays logged in, and the Addressables window can still deploy to it.";
                 tenantMismatchLabel.style.display = DisplayStyle.Flex;
             }
             else
@@ -414,10 +414,10 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             // Resolving the tenant and the auth config, the Azure login, the token exchange and the role check
             // are ConnectionLoginService's: the command line runs the same steps. The login ends as a
-            // connection in the per-user store, and this project uses it from now on.
+            // connection in the per-user store, and this project plays with it from now on.
             LoginOptions options = new()
             {
-                MakeActive = true,   // a click in this window is the user's choice of connection
+                MakeDefault = true,   // a click in this window is the user's choice of the default connection
                 OnStatus = status => { if (loginStatusLabel != null) loginStatusLabel.text = status; },
             };
 
@@ -429,19 +429,20 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Moves the project onto the stored connection of the config just selected, when there is one: its login
-        /// then shows, and the deploy and the other editor requests go to its tenant.
+        /// Makes the stored connection of the config just selected, when there is one, the project's default connection:
+        /// its login then shows here, and "Configure App" and the commands that name no connection use its tenant. Where a deploy goes is chosen in the
+        /// Addressables window, per connection.
         /// </summary>
         private void UseConnectionOfSelection()
         {
             AppIdentification selected = appConfigurationSettings.SelectedConfig;
             ConnectionRecord stored = selected?.Credential == null ? null : ConnectionStore.FindByAppId(selected.Credential.AppId);
 
-            if (stored == null || string.Equals(stored.Key, ProjectConnections.ActiveKey, StringComparison.OrdinalIgnoreCase))
+            if (stored == null || string.Equals(stored.Key, ProjectConnections.DefaultKey, StringComparison.OrdinalIgnoreCase))
                 return;
 
-            ProjectConnections.Use(stored.Key);
-            // Every window that shows the active connection (this one, the Addressables window) reloads, not only this one.
+            ProjectConnections.Use(stored.Key, makeDefault: true);
+            // Every window that shows the default connection reloads, not only this one.
             EditorLoginState.NotifyLoginChanged();
         }
 

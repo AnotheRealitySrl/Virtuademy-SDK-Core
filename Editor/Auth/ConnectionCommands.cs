@@ -15,7 +15,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary><c>login</c>, <c>logout</c>, <c>connections</c>, <c>whoami</c>, or <c>status</c> (both of the last two).</summary>
         public string Command;
 
-        /// <summary>A connection in the store: its key, tenant key, tenant label or <c>app/env</c>. Empty means the project's active one.</summary>
+        /// <summary>A connection in the store: its key, tenant key, tenant label or <c>app/env</c>. Empty means the project's default one.</summary>
         public string Connection;
 
         /// <summary>For <c>login</c> of a connection that is not in the store yet: the app and the environment of the project's configuration file.</summary>
@@ -76,7 +76,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                         break;
 
                     case "status":
-                        // Both answers in one: what the store holds, and the connection asked for (or the active one).
+                        // Both answers in one: what the store holds, and the connection asked for (or the default one).
                         AddConnections(result);
                         ConnectionRecord target = ResolveTarget(request, out string targetError);
                         if (target != null)
@@ -114,14 +114,14 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private static void AddConnections(ConnectionCommandResult result)
         {
-            string active = ProjectConnections.ActiveKey;
+            string defaultConnection = ProjectConnections.DefaultKey;
             IReadOnlyList<string> used = ProjectConnections.Used;
 
             result.Fields["connections"] = ConnectionStore.All().Select(c =>
             {
                 Dictionary<string, object> summary = c.ToSummary();
                 summary["usedByProject"] = used.Contains(c.Key, StringComparer.OrdinalIgnoreCase);
-                summary["active"] = string.Equals(c.Key, active, StringComparison.OrdinalIgnoreCase);
+                summary["default"] = string.Equals(c.Key, defaultConnection, StringComparison.OrdinalIgnoreCase);
                 return summary;
             }).ToList();
 
@@ -215,7 +215,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 ConnectionRecord record = ResolveTarget(request, out string error);
                 if (record == null)
                 {
-                    // Nothing named and nothing active: the project's only configuration file is the way in.
+                    // Nothing named and no default connection: the project's only configuration file is the way in.
                     if (string.IsNullOrWhiteSpace(request.Connection)
                         && ConnectionLoginService.TryFindProjectCredential(null, request.Env, out AppIdentification identification,
                                                                            out string app, out string env, out _))
@@ -252,7 +252,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             };
         }
 
-        /// <summary>The connection a request names, or the project's active one when it names none.</summary>
+        /// <summary>The connection a request names, or the project's default one when it names none.</summary>
         private static ConnectionRecord ResolveTarget(ConnectionCommandRequest request, out string error)
         {
             error = null;
@@ -260,11 +260,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             if (!string.IsNullOrWhiteSpace(request.Connection))
                 return ConnectionStore.Find(request.Connection, out error);
 
-            ConnectionRecord active = ConnectionStore.Get(ProjectConnections.ActiveKey);
-            if (active == null)
-                error = "The project has no active connection: name one with the connection argument (see the connections command).";
+            ConnectionRecord defaultConnection = ConnectionStore.Get(ProjectConnections.DefaultKey);
+            if (defaultConnection == null)
+                error = "The project has no default connection: name one with the connection argument (see the connections command).";
 
-            return active;
+            return defaultConnection;
         }
 
         #endregion

@@ -17,10 +17,12 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// </summary>
     /// <remarks>
     /// There is no "current login" any more, only the connection an operation names. The one the project
-    /// calls <see cref="ActiveKey"/> is what the window's login, the deploy and the other editor requests
-    /// that name no connection use: the one chosen in the window (a login there makes it active), or the first one this
-    /// project used. A login from the command line or a request file makes its connection active only when the
-    /// project has none (<see cref="Use"/>).
+    /// calls <see cref="DefaultKey"/> is what an editor request or a command that names no connection falls back to,
+    /// and the one the Available Tenants window shows and "Configure App" uses. It decides neither where a deploy goes,
+    /// which names its own connections, nor play mode (the tenant switch writes <c>PlatformCredentials.asset</c> from
+    /// the selected file). It is chosen in the Available Tenants window (a selection
+    /// or a login there makes it the default one). A login from the command line or a request file makes its
+    /// connection the default one only when the project has none (<see cref="Use"/>).
     /// The deploy targets, and the world ticks that used to live in one machine-wide EditorPrefs value, join
     /// this file in a later step.
     /// </remarks>
@@ -29,7 +31,17 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private sealed class Selection
         {
             public List<string> Used { get; set; } = new();
+            public string Default { get; set; }
+
+            /// <summary>
+            /// Read only: what the first implementation called the "active connection" and wrote here. It was the one the
+            /// window chose, so a file that has it takes it as its default connection, and the next write drops it.
+            /// </summary>
+            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
             public string Active { get; set; }
+
+            /// <summary>Read only: the name the default connection had in this file while it was called the play-mode connection.</summary>
+            [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
             public string PlayMode { get; set; }
         }
 
@@ -68,17 +80,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// The connection the project's editor requests go to when they name none. Null when the project has
-        /// none, or the one it had was removed from the store.
+        /// The project's default connection: the one an editor request or a command that names no connection falls back
+        /// to, and the one the Available Tenants window shows and "Configure App" uses. When none was chosen and the project uses exactly one connection of
+        /// the store, that one. Null when the project has none, or the one it had was removed from the store.
         /// </summary>
-        public static string ActiveKey
+        public static string DefaultKey
         {
             get
             {
                 lock (gate)
                 {
                     Selection selection = Read();
-                    string key = selection.Active;
+                    string key = selection.Default;
 
                     if (string.IsNullOrEmpty(key))
                     {
@@ -91,21 +104,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             }
         }
 
-        /// <summary>The connection play mode reads its tenant from. Not consumed yet.</summary>
-        public static string PlayModeKey
-        {
-            get
-            {
-                lock (gate)
-                    return Read().PlayMode;
-            }
-        }
-
         /// <summary>
-        /// Records that the project uses <paramref name="key"/>, and makes it the active one when asked to or when the
-        /// project has no active connection yet.
+        /// Records that the project uses <paramref name="key"/>, and makes it the default connection when asked to or when
+        /// the project has none yet.
         /// </summary>
-        public static void Use(string key, bool makeActive = true)
+        public static void Use(string key, bool makeDefault = true)
         {
             if (string.IsNullOrEmpty(key) || ConnectionStore.IsWorkerProcess)
                 return;
@@ -116,10 +119,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 if (!selection.Used.Contains(key, StringComparer.OrdinalIgnoreCase))
                     selection.Used.Add(key);
 
-                if (makeActive || string.IsNullOrEmpty(selection.Active))
-                    selection.Active = key;
+                if (makeDefault || string.IsNullOrEmpty(selection.Default))
+                    selection.Default = key;
 
-                selection.PlayMode ??= key;
                 Write(selection);
             }
         }
@@ -137,6 +139,12 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             try
             {
                 cache = JsonConvert.DeserializeObject<Selection>(File.ReadAllText(path, Encoding.UTF8)) ?? new Selection();
+
+                // Older files of this change: the window's choice was Active, later PlayMode.
+                if (string.IsNullOrEmpty(cache.Default))
+                    cache.Default = !string.IsNullOrEmpty(cache.Active) ? cache.Active : cache.PlayMode;
+                cache.Active = null;
+                cache.PlayMode = null;
             }
             catch (Exception ex) when (ex is IOException || ex is JsonException)
             {

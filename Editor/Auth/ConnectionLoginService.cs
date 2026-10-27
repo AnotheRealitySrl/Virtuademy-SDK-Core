@@ -34,11 +34,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         public bool BindToProject = true;
 
         /// <summary>
-        /// Also make it the project's active connection. Off by default: a login started by a script or a request file
-        /// must not move a project that is deploying, or that a person is working in, onto another tenant. A project with
-        /// no active connection takes the first one it logs into either way. The window sets it: a click is a choice.
+        /// Also make it the project's default connection. Off by default: a login started by a script or a request file
+        /// must not change the default connection of a project that a person is working in. A project with no
+        /// default connection takes the first one it logs into either way. The window sets it: a click is a choice.
         /// </summary>
-        public bool MakeActive;
+        public bool MakeDefault;
 
         public CancellationToken Cancellation;
 
@@ -49,7 +49,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         {
             Interactive = Interactive,
             BindToProject = BindToProject,
-            MakeActive = MakeActive,
+            MakeDefault = MakeDefault,
             Cancellation = Cancellation,
             OnStatus = OnStatus,
             Browser = new InteractiveLoginOptions
@@ -250,7 +250,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                     return LoginOutcome.Fail("profile-api", "The platform did not give a token for this tenant (see the Console).", record);
 
                 if (options.BindToProject)
-                    ProjectConnections.Use(key, options.MakeActive);
+                    ProjectConnections.Use(key, options.MakeDefault);
 
                 EditorLoginState.NotifyLoginChanged();
 
