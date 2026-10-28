@@ -71,6 +71,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         {
             VisualElement root = rootVisualElement;
 
+            root.Add(VirtuademyWindowHeader.Create("Available Tenants"));
             VisualElement labelFromUXML = m_VisualTreeAsset.Instantiate();
             root.Add(labelFromUXML);
 
