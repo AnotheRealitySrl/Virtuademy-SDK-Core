@@ -17,7 +17,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// project's asset cannot be the answer for a connection that is not the project's play-mode tenant. A
     /// token is sent to the host of the connection it belongs to, and to no other.
     /// <para>
-    /// The members without a connection key mean the project's default connection
+    /// The members without a connection key mean the default connection
     /// (<see cref="ProjectConnections.DefaultKey"/>), for the callers written before every request named its
     /// connection.
     /// </para>
@@ -25,7 +25,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     public static class EditorApiEndpoint
     {
         /// <summary>
-        /// Base URL of the default connection's Application API, or null when the project has no connection or
+        /// Base URL of the default connection's Application API, or null when the computer has no usable connection or
         /// its tenant reported none — callers already treat that as "cannot reach the platform".
         /// </summary>
         public static string ApplicationApiUrl => ApplicationApiUrlOf(ProjectConnections.DefaultKey);

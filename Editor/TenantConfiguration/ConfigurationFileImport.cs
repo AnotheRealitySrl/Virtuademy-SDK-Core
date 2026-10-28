@@ -19,7 +19,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// <list type="bullet">
     /// <item><description>An environment project (the Publish Environments window, and <c>EnvironmentsCli tenant-config</c>):
     /// into the encrypted connection store only, <see cref="ImportIntoStoreAsync"/>. No file stays in <c>Assets/</c>, and
-    /// the project records the connections as ones it uses.</description></item>
+    /// every environment project of the computer uses the connections.</description></item>
     /// <item><description>An application (the Available Tenants window): into the project, <see cref="ImportIntoProject"/>,
     /// because the tenant switch writes <c>PlatformCredentials.asset</c> from the selected file.</description></item>
     /// </list>
@@ -44,6 +44,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             /// <summary>Per environment that could not become a connection: <c>&lt;env&gt;: &lt;reason&gt;</c>.</summary>
             public List<string> Failures = new();
 
+            /// <summary>The environment keys among <see cref="Failures"/> whose app key is not a CreatorKit app (outcome <c>platform-mismatch</c>).</summary>
+            public List<string> PlatformMismatches = new();
+
             public bool Success => Failures.Count == 0 && Connections.Count > 0;
         }
 
@@ -57,8 +60,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         /// <summary>
         /// The file's credentials into the connection store, one connection per environment of the file (or only
-        /// <paramref name="env"/>), each recorded as one the project uses. Needs the network: a connection is named by the tenant key the platform
-        /// gives (<see cref="ConnectionLoginService.AddConnectionAsync"/>). No login is made.
+        /// <paramref name="env"/>). Needs the network: a connection is named by the tenant key the platform
+        /// gives (<see cref="ConnectionLoginService.AddConnectionAsync"/>). No login is made. A file whose app is not a CreatorKit
+        /// app is refused (<c>platform-mismatch</c>), and no connection is added for it.
         /// </summary>
         /// <exception cref="InvalidOperationException">The file is missing, is not a tenant configuration, or has no
         /// such environment. The message never quotes the file.</exception>
@@ -76,18 +80,23 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 result.Envs.Add(entry.Key);
 
                 LoginOutcome outcome = await ConnectionLoginService.AddConnectionAsync(entry.Value, result.App, entry.Key,
-                    new LoginOptions { BindToProject = true, OnStatus = onStatus });
+                    new LoginOptions { OnStatus = onStatus });
 
                 if (outcome.Success)
                     result.Connections.Add(outcome.Connection);
                 else
+                {
                     result.Failures.Add($"{entry.Key}: {outcome.Message}");
+
+                    if (outcome.Code == "platform-mismatch")
+                        result.PlatformMismatches.Add(entry.Key);
+                }
             }
 
             if (result.Connections.Count > 0)
                 EditorLoginState.NotifyLoginChanged();
 
-            Debug.Log($"[ConfigurationFileImport] {result.App}: {result.Connections.Count} connection(s) in the store and used by this project" +
+            Debug.Log($"[ConfigurationFileImport] {result.App}: {result.Connections.Count} connection(s) in the store, used by every environment project of this computer" +
                       (result.Connections.Count > 0 ? $" ({string.Join(", ", result.Connections.Select(c => $"{c.TenantLabel} {c.Environment}"))})" : "") +
                       (result.Failures.Count > 0 ? $"; not imported: {string.Join("; ", result.Failures)}" : "") + ".");
 

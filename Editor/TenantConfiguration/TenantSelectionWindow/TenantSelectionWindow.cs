@@ -149,13 +149,22 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 // a product name, a theme, a set of localized assets out of the app's custom
                 // config — and that configurator writes the generated assets on its way through.
                 // A project without one still needs them written, which is what TenantSwitch is.
-                if (appConfigurationSettings.ConfigurationScript != null)
+                try
                 {
-                    await appConfigurationSettings.ConfigurationScript.ConfigureApp(appConfigurationSettings);
+                    if (appConfigurationSettings.ConfigurationScript != null)
+                    {
+                        await appConfigurationSettings.ConfigurationScript.ConfigureApp(appConfigurationSettings);
+                    }
+                    else
+                    {
+                        await TenantSwitch.Apply(appConfigurationSettings);
+                    }
                 }
-                else
+                catch (AppPlatformMismatchException ex)
                 {
-                    await TenantSwitch.Apply(appConfigurationSettings);
+                    // Nothing was written. A dialog, not only the Console: the click would otherwise seem to do nothing.
+                    Debug.LogError($"[TenantSelectionWindow] {ex.Message}");
+                    EditorUtility.DisplayDialog("Wrong app for this project", ex.Message, "OK");
                 }
             };
 

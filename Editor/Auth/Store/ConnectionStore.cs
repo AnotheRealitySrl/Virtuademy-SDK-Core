@@ -70,6 +70,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private static string cachePath;
         private static long cacheStamp;
 
+        // True when the last look at the store found its file and read it. False when there is no file (nothing written yet, or
+        // it vanished for a moment), and while the last attempt to read it failed: what All() returns is then no statement
+        // about which connections exist.
+        private static bool readFromFile;
+
         /// <summary>For tests: moves the whole store (records, MSAL cache, locks, status) to another folder.</summary>
         internal static string RootOverride;
 
@@ -105,6 +110,26 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         /// <summary>True in an asset-import worker process, which never touches the store.</summary>
         public static bool IsWorkerProcess => isWorker;
+
+        /// <summary>
+        /// True when the connections are the content of the store's file, read now: only then does a connection missing from
+        /// <see cref="All"/> mean it is not in the store. False in a worker process, which reads nothing; in memory-only mode,
+        /// where the store is empty after every restart; when there is no file (it was never written, or it is out of reach for
+        /// a moment, such as inside <see cref="WriteAtomic"/>'s swap); and while the file cannot be read (swapped by another
+        /// process, damaged).
+        /// </summary>
+        internal static bool WasRead
+        {
+            get
+            {
+                if (isWorker || !IsPersistent)
+                    return false;
+
+                All();
+                lock (gate)
+                    return readFromFile;
+            }
+        }
 
         #endregion
 
@@ -348,6 +373,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 cache = new List<ConnectionRecord>();
                 cachePath = path;
                 cacheStamp = 0;
+                readFromFile = false;
                 return cache;
             }
 
@@ -361,12 +387,15 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 cache = read;
                 cachePath = path;
                 cacheStamp = Stamp(path);
+                readFromFile = true;
             }
             catch (Exception ex) when (ex is IOException || ex is JsonException || ex is System.ComponentModel.Win32Exception || ex is CryptographicException)
             {
                 // Another process has the file in the middle of a swap, or it is damaged. A reader without the lock
                 // never touches the file: it keeps what it last read, and the next change (under the lock) sets a
                 // damaged file aside.
+                readFromFile = false;
+
                 if (!(ex is IOException) && stamp != lastUnreadableStamp)
                 {
                     lastUnreadableStamp = stamp;
@@ -472,6 +501,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             cache = records;
             cachePath = RecordsPath;
             cacheStamp = Stamp(RecordsPath);
+            readFromFile = true;
 
             WriteStatus(records);
         }

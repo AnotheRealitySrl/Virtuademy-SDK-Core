@@ -30,9 +30,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary>Where the authorization URL goes and how long each phase of the browser login may take.</summary>
         public InteractiveLoginOptions Browser = new();
 
-        /// <summary>Record the connection as one this project uses.</summary>
-        public bool BindToProject = true;
-
         public CancellationToken Cancellation;
 
         /// <summary>Told what the login is doing ("Fetching tenant data...", "Logging in..."), for a status label.</summary>
@@ -41,7 +38,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         internal LoginOptions Clone() => new()
         {
             Interactive = Interactive,
-            BindToProject = BindToProject,
             Cancellation = Cancellation,
             OnStatus = OnStatus,
             Browser = new InteractiveLoginOptions
@@ -60,7 +56,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         public bool Success;
 
         /// <summary>A short, stable name for what went wrong: <c>ok</c>, <c>tenant-data</c>, <c>auth-config</c>, <c>no-tenant-key</c>,
-        /// <c>login-timeout</c>, <c>login-failed</c>, <c>account-mismatch</c>, <c>login-required</c>, <c>profile-api</c>, <c>cancelled</c>.</summary>
+        /// <c>login-timeout</c>, <c>login-failed</c>, <c>account-mismatch</c>, <c>platform-mismatch</c>, <c>login-required</c>, <c>profile-api</c>, <c>cancelled</c>.</summary>
         public string Code;
 
         public string Message;
@@ -83,7 +79,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// <remarks>
     /// The connection's key needs the tenant key from <c>config-public</c>, so a credential is turned into a
     /// connection by asking the platform; that is why importing the project's configuration files needs the
-    /// network. A credential whose <c>config-public</c> gives no tenant key (a platform-admin app) is refused.
+    /// network. A credential whose <c>config-public</c> gives no tenant key (a platform-admin app) is refused, and so is one
+    /// whose app is not a CreatorKit app (<see cref="AppPlatforms"/>).
     /// </remarks>
     public static class ConnectionLoginService
     {
@@ -241,9 +238,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 if (stored == null)
                     return LoginOutcome.Fail("profile-api", "The platform did not give a token for this tenant (see the Console).", record);
 
-                if (options.BindToProject)
-                    ProjectConnections.Use(key);
-
                 EditorLoginState.NotifyLoginChanged();
 
                 Debug.Log($"[ConnectionLoginService] Login successful for tenant: {stored.TenantLabel}, user: {stored.Username}, " +
@@ -300,8 +294,8 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         #region Adding a connection
 
         /// <summary>
-        /// Adds the connection a credential belongs to, with no login, and records it as one the project uses
-        /// (<see cref="LoginOptions.BindToProject"/>). Idempotent: it refreshes what the platform says.
+        /// Adds the connection a credential belongs to, with no login. Every environment project uses it from then on.
+        /// Idempotent: it refreshes what the platform says.
         /// </summary>
         public static async Task<LoginOutcome> AddConnectionAsync(AppIdentification identification, string app, string env, LoginOptions options = null)
         {
@@ -309,13 +303,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             try
             {
-                LoginOutcome outcome = await AddConnectionCoreAsync(identification, app, env, options);
-
-                // Here and not in the core, which a login runs first: a login that then fails must not bind the connection.
-                if (outcome.Success && options.BindToProject)
-                    ProjectConnections.Use(outcome.Connection.Key);
-
-                return outcome;
+                return await AddConnectionCoreAsync(identification, app, env, options);
             }
             catch (Exception ex)
             {
@@ -326,9 +314,9 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         /// <summary>
         /// Reads a stored connection's tenant again over HMAC, with no login: its label, environment and platform version
-        /// (which an operator can change at any time, an upgrade included), and the auth configuration. Changes nothing
-        /// else of the record, its session included, and does not bind it to the project. The deploy targets check the
-        /// version rule against what this stores.
+        /// (which an operator can change at any time, an upgrade included), the platform of its app key, and the auth
+        /// configuration. Changes nothing else of the record, its session included. The deploy targets check the version
+        /// rule against what this stores.
         /// </summary>
         public static async Task<LoginOutcome> RefreshConnectionAsync(string connectionKey)
         {
@@ -368,6 +356,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 r.TenantLabel = resolved.Tenant.Label;
                 r.Environment = resolved.Public.Environment ?? resolved.Tenant.Env.ToString();
                 r.PlatformVersion = resolved.Public.PlatformVersion;
+                r.Platform = resolved.Public.App?.Platform;
                 r.BackofficeUrl = resolved.Public.BackofficeUrl;
                 r.App = app ?? r.App;
                 r.Env = env ?? r.Env;
@@ -403,8 +392,21 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             Tenant tenant = tenantResponse.Content;
 
-            // 2. The public configuration: the tenant key that names the connection
+            // 2. The public configuration: the platform of the app key, and the tenant key that names the connection
             ApiResponse<TenantPublicConfig> publicResponse = await TenantConfigurationClient.GetTenantPublicConfig(identification);
+
+            // An environment project takes only CreatorKit apps. Checked before anything is stored, and before the tenant key
+            // is demanded: an app of another platform that has no tenant (a platform-admin app) is told so, not that it
+            // belongs to no tenant.
+            if (publicResponse.IsSuccess)
+            {
+                string platform = publicResponse.Content?.App?.Platform;
+                if (platform == null)
+                    WarnPlatformUnknown();
+                else if (!AppPlatforms.Matches(platform, AppPlatforms.CreatorKit))
+                    return await PlatformMismatchAsync(identification, publicResponse.Content, platform);
+            }
+
             if (!publicResponse.IsSuccess || publicResponse.Content?.TenantKey == null)
             {
                 string reason = publicResponse.IsSuccess
@@ -462,6 +464,57 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 ClientId = identification.Credential.AppId.ToString(),
                 Key = ConnectionRecord.MakeKey(identification.ApiBaseUrl, publicResponse.Content.TenantKey.Value),
             };
+        }
+
+        private static bool warnedPlatformUnknown;
+
+        private static void WarnPlatformUnknown()
+        {
+            if (warnedPlatformUnknown)
+                return;
+
+            warnedPlatformUnknown = true;
+            Debug.LogWarning("[ConnectionLoginService] The platform did not say which kind of app this key is for (a Configuration-API older than " +
+                             "2026.7.0), so the check that it is a CreatorKit app could not run.");
+        }
+
+        /// <summary>
+        /// The credential is an app of another platform. When the connection in the store is this credential's own (the same
+        /// app id), its record gets the platform written on it, so the Publish Environments window can show it locked, and
+        /// comes back with the failure. A connection is named by the tenant, so the record of the same tenant can belong to
+        /// another app: it is left as it is, and the failure carries no connection.
+        /// </summary>
+        private static async Task<Resolution> PlatformMismatchAsync(AppIdentification identification, TenantPublicConfig publicConfig, string platform)
+        {
+            ConnectionRecord record = null;
+
+            if (publicConfig.TenantKey != null)
+            {
+                string key = ConnectionRecord.MakeKey(identification.ApiBaseUrl, publicConfig.TenantKey.Value);
+                string appId = identification.Credential.AppId.ToString();
+                record = ConnectionStore.Get(key);
+
+                if (record != null && string.Equals(record.AppId, appId, StringComparison.OrdinalIgnoreCase))
+                {
+                    record = await ConnectionStore.UpdateAsync(key, r =>
+                    {
+                        if (r != null && string.Equals(r.AppId, appId, StringComparison.OrdinalIgnoreCase))
+                            r.Platform = platform;
+                        return r;
+                    }) ?? record;
+                }
+                else
+                {
+                    record = null;
+                }
+            }
+
+            string message = $"This app key is for {AppPlatforms.Describe(platform)} (platform '{platform}'), and an environment project needs a " +
+                             "CreatorKit app key. In the Back Office, download the CreatorKit configuration file (Download SDK Environments Config) " +
+                             "and use that one.";
+
+            Debug.LogWarning($"[ConnectionLoginService] {message}");
+            return new Resolution { Failure = LoginOutcome.Fail("platform-mismatch", message, record) };
         }
 
         /// <summary>
@@ -529,8 +582,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// Adds to the store every credential of the project's configuration files that it does not hold yet:
         /// the migration of the old per-project JSON credentials (ADR 0037). Asks the platform once per
         /// credential, so it needs the network; a credential that cannot be resolved is reported, not fatal.
-        /// Every connection a file of the project stands for, new or already stored, is recorded as one the project
-        /// uses, so the Publish Environments window offers it as a deploy target.
         /// </summary>
         public static async Task<(int Added, int AlreadyKnown, List<string> Failures)> ImportProjectCredentialsAsync(AppConfigurationSettings settings)
         {
@@ -549,10 +600,6 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                     ConnectionRecord stored = identification?.Credential == null ? null : ConnectionStore.FindByAppId(identification.Credential.AppId);
                     if (identification?.Credential == null || stored != null)
                     {
-                        // A file of the project is a connection the project uses, even when another project added it to the store.
-                        if (stored != null)
-                            ProjectConnections.Use(stored.Key);
-
                         known++;
                         continue;
                     }
@@ -615,6 +662,43 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             EditorLoginState.NotifyLoginChanged();
             Debug.Log($"[ConnectionLoginService] Logged out of {record.TenantLabel} ({record.Key}).");
+            return true;
+        }
+
+        /// <summary>
+        /// Removes a connection from this computer ("Remove from this computer..." in the Publish Environments window): it is
+        /// logged out first (<see cref="LogoutAsync"/>, with its rule for the MSAL account), then its record leaves the store,
+        /// this project's deploy targets for it go, and every view is told. Every project on the computer loses the
+        /// connection, and using the tenant again takes its configuration file and a login. The deploy targets other
+        /// projects keep for it are dropped the next time they read them. Never runs in an asset-import worker process.
+        /// </summary>
+        /// <returns>False when the connection is not in the store, or the store is locked or not available in this process.</returns>
+        public static async Task<bool> RemoveFromComputerAsync(string connectionKey)
+        {
+            if (ConnectionStore.IsWorkerProcess)
+                return false;
+
+            ConnectionRecord record = ConnectionStore.Get(connectionKey);
+            if (record == null)
+                return false;
+
+            // First: a failure to remove the MSAL account is swallowed, and the record is what says which account it is.
+            await LogoutAsync(record.Key);
+
+            try
+            {
+                await ConnectionStore.UpdateAsync(record.Key, _ => null);
+            }
+            catch (TimeoutException ex)
+            {
+                Debug.LogError($"[ConnectionLoginService] {record.TenantLabel} was logged out but not removed: {ex.Message}");
+                return false;
+            }
+
+            ProjectConnections.DropTargets(record.Key);
+            EditorLoginState.NotifyLoginChanged();
+
+            Debug.Log($"[ConnectionLoginService] Removed {record.TenantLabel} ({record.Key}) from this computer.");
             return true;
         }
 

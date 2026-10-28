@@ -41,7 +41,7 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
 - **A token goes only to its own connection's hosts.** `EditorSessionManager` refuses (`InvalidOperationException`, nothing
   sent) a request whose host is not one of the connection's tenant APIs, and the editor tools take the connection key once per
   operation and pass it down: `EnvironmentsDeploy`, `PublishedEnvironmentsIndex`, the hot-update verifier and policy fetch
-  all take an optional `connectionKey` (null means the project's only connection, read once at the start). The project's
+  all take an optional `connectionKey` (null means the only usable connection of the computer, read once at the start). The
   connections can change while a deploy runs (an import, a removal) without the deploy following them.
 - `ConnectionStore.UpdateAsync` and `LockRenewalAsync`: another process's lock is awaited with `Task.Delay`, not slept on, so
   the editor's main thread is never held up behind it (a 3 s hold: the loop ticked normally). MSAL calls that touch the cache
@@ -49,15 +49,19 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
 - The interactive login passes the pinned account to the browser (`WithAccount`) and refuses an answer for another account
   (`LoginAccountMismatchException`, code `account-mismatch`): the browser's single sign-on cannot swap the connection's user.
   A request that joins a login in flight hears the same authorization URL.
-- `ProjectConnections` (`UserSettings/Virtuademy/connections.json`, no token and no secret): the connections the project
-  uses. **Nobody chooses a default connection**: an editor request or a command that names no connection uses the project's
-  only one (`DefaultKey`), and with two or more it must name its connection (the command line exits 26). It decides neither
-  where a deploy goes nor play mode. The same file keeps the project's deploy targets, per connection a
-  world or the tenant level (`ProjectConnections.DeployTarget`, `TargetsOf`, `SetTargets`), which the Publish Environments
-  window ticks. A connection added from a configuration file of the project
-  (`ConnectionLoginService.AddConnectionAsync`, the import of the project's files) counts as one the project uses; a login that
-  fails does not bind its connection. `ConnectionLoginService.RefreshConnectionAsync(key)` reads a
-  stored connection's tenant again over HMAC (label, environment, platform version), with no login.
+- `ProjectConnections`: **every connection in the store is used by every environment project** of the computer, with no
+  import or login made from the project (`All()`, sorted by tenant label, environment and key, so the order does not change
+  when a record is rewritten; `Usable()`, without the connections whose app key is not a CreatorKit app; `UsableCount`).
+  **Nobody chooses a default connection**: an editor request or a command that names no connection uses the only usable
+  connection of the computer (`DefaultKey`), and with none, or two or more, it must name its connection (the command line
+  exits 26). It decides neither where a deploy goes nor play mode. `UserSettings/Virtuademy/connections.json` (no token and
+  no secret) keeps the project's deploy targets, per connection a world or the tenant level
+  (`ProjectConnections.DeployTarget`, `TargetsOf`, `SetTargets`), which the Publish Environments window ticks. The targets of
+  a connection that is no longer in the store are dropped when the file is next read, only when the store was read from its
+  file: not in an asset-import worker, not in memory-only mode (the store is empty after every restart), and not when the
+  file is missing or cannot be read at that moment. The list of connections that earlier files of the project carry is ignored.
+  `ConnectionLoginService.RefreshConnectionAsync(key)` reads a stored connection's tenant again over HMAC (label,
+  environment, platform version, app platform), with no login.
 - `LegacyLoginMigration`: the first use of the store in a process deletes `Virtuademy_EditorLogin_Token` from EditorPrefs and
   SessionState (once per OS user, a marker in the store folder says so) and nothing else; the other nine
   `Virtuademy_EditorLogin_*` keys stay for an older SDK on the same machine and nothing reads them.
@@ -80,12 +84,30 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
   `Virtuademy-SDK-Environments` opens it (meta-repo ADR 0038).
 - **`ConfigurationFileImport`: the import of the Back Office file, shared by both windows** (meta-repo ADR 0037, "Windows
   per kind of project"). `ImportIntoStoreAsync(file, env)` puts the file's credentials into the connection store, one
-  connection per environment of the file, each recorded as one the project uses, and writes nothing to the project: the Publish Environments window and `EnvironmentsCli tenant-config` of
+  connection per environment of the file, and writes nothing to the project: the Publish Environments window and `EnvironmentsCli tenant-config` of
   `Virtuademy-SDK-Environments` call it, for environment projects. `ImportIntoProject(file, settings)` is the application's
   import, into the project and onto the settings asset, with the git dialog that the Available Tenants window used to hold
   itself. `PickFile()` opens the file panel in the user's Downloads folder. Nothing logs the file's content.
-- `ProjectConnections.Remove(key)`: the project stops using a connection ("Remove from project..." in the Publish
-  Environments window), with its deploy targets; the connection stays in the store. `ProjectConnections.UsedInStoreCount`.
+- `ConnectionLoginService.RemoveFromComputerAsync(key)` ("Remove from this computer..." in the Publish Environments window
+  of `Virtuademy-SDK-Environments`): logs the connection out (with the MSAL account rule), deletes its record from the store,
+  drops this project's deploy targets for it and tells every view. Every project on the computer loses the connection; the
+  targets other projects keep for it go the next time they read them.
+- **The platform of an app key** (meta-repo ADR 0037, "The app key's platform"). `TenantPublicConfig.App`
+  (`TenantPublicAppConfig`: `Platform`, `AcceptedOrigins`, `OfferedOrigins`) carries the `app` object of `config-public`;
+  `AppPlatforms` has the platform names and `Matches`/`Describe`; `ConnectionRecord.Platform` keeps what the last import,
+  login or refresh found, `PlatformMismatch` is true when it is not CreatorKit, and `platform` is in `ToSummary()` (so in
+  `status.json`, `connections` and `whoami`). An environment project takes only CreatorKit apps: the import, a login and a
+  refresh fail with the outcome `platform-mismatch` (`ConnectionCommands` status `platform-mismatch`) before a new connection
+  is stored; a connection already in the store gets its platform written when the credential checked is its own (the same app
+  id: a connection is named by the tenant, so another app of the tenant leaves the record as it is), stays listed and can be
+  removed.
+  `ConfigurationFileImport.StoreImportResult.PlatformMismatches` names the environments refused for it. A Configuration-API
+  that does not send the field is accepted, with one warning that the check could not run.
+- **The tenant switch checks the platform of the selected app** (`TenantSwitch.ReadTenant`, so "Change config" and the
+  application's configurator): the Virtuademy application takes the platform in the new
+  `AppConfigurationSettings.AppPlatform` (`WebGL`, `Mobile`, `VR`; empty warns and skips the check), an external app
+  `ExternalApp`. A mismatch throws `AppPlatformMismatchException` (`Expected`, `Found`) before anything is written, and the
+  window shows its message in a dialog.
 - `TenantSelectionWindow.ActionsCreated` and `TenantSelectionWindow.Settings`: an application adds its own buttons beside
   "Change config" (the Virtuademy application adds its Build button there) and reads the settings asset when one is clicked.
 - **`VirtuademyWindowHeader`** (`Editor/Common/`): the Virtuademy header of the SDK's editor windows, the logo (light or
@@ -96,7 +118,7 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
 
 ### Changed
 - **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only
-  view of the project's default connection: nothing is kept in SessionState or EditorPrefs any more (the token sat in clear text
+  view of the default connection (the only usable one of the computer): nothing is kept in SessionState or EditorPrefs any more (the token sat in clear text
   in the registry), and a renewal or a logout done by another process shows at once. Removed: `EditorLoginState.Set`,
   `UpdateToken`, `MarkTokenExpired` and `Clear`, and `EditorSessionManager.LoginAsync(Tenant, ...)` (use
   `ConnectionLoginService.LoginAsync`). Old sessions are not carried over: every connection needs one login.
@@ -119,7 +141,7 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
   and imports a file into the project (`ConfigurationFileImport.ImportIntoProject`). It has no login, logout, session label or
   mismatch warning any more, no Build button and no App configuration button: the editor logs in only to publish
   environments, in the Publish Environments window of `Virtuademy-SDK-Environments`, which also took over the move of the
-  project's old configuration files into the store. A selection no longer changes the project's connections. Its
+  project's old configuration files into the store. A selection no longer changes the connections of the store. Its
   menu, `Virtuademy/Available Tenants`, is compiled only where the window has a job: not in a project that has
   `Virtuademy-SDK-Environments` installed (an environment project; `versionDefines` sets `VIRTUADEMY_SDK_ENVIRONMENTS`),
   unless the project defines `VIRTUADEMY_APPLICATION`, as the Virtuademy application does. The class stays public in every

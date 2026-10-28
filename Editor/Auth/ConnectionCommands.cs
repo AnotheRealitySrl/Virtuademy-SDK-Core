@@ -15,7 +15,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary><c>login</c>, <c>logout</c>, <c>connections</c>, <c>whoami</c>, or <c>status</c> (both of the last two).</summary>
         public string Command;
 
-        /// <summary>A connection in the store: its key, tenant key, tenant label or <c>app/env</c>. Empty means the project's default one.</summary>
+        /// <summary>A connection in the store: its key, tenant key, tenant label or <c>app/env</c>. Empty means the only usable connection of the computer.</summary>
         public string Connection;
 
         /// <summary>For <c>login</c> of a connection that is not in the store yet: the app and the environment of the project's configuration file.</summary>
@@ -32,7 +32,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// <summary>What a connection command did. <see cref="Fields"/> never holds a token or a secret.</summary>
     public sealed class ConnectionCommandResult
     {
-        /// <summary><c>done</c>, <c>login-required</c>, <c>connection-unknown</c>, <c>login-timeout</c>, <c>login-failed</c>, <c>store-not-persistent</c> or <c>bad-request</c>.</summary>
+        /// <summary><c>done</c>, <c>login-required</c>, <c>connection-unknown</c>, <c>login-timeout</c>, <c>login-failed</c>, <c>platform-mismatch</c>, <c>store-not-persistent</c> or <c>bad-request</c>.</summary>
         public string Status;
 
         public string Error;
@@ -76,7 +76,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                         break;
 
                     case "status":
-                        // Both answers in one: what the store holds, and the connection asked for (or the default one).
+                        // Both answers in one: what the store holds, and the connection asked for (or the only usable one).
                         AddConnections(result);
                         ConnectionRecord target = ResolveTarget(request, out string targetError);
                         if (target != null)
@@ -115,12 +115,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         private static void AddConnections(ConnectionCommandResult result)
         {
             string defaultConnection = ProjectConnections.DefaultKey;
-            IReadOnlyList<string> used = ProjectConnections.Used;
 
-            result.Fields["connections"] = ConnectionStore.All().Select(c =>
+            // Every connection of the computer is used by every environment project, so there is no per-project flag.
+            result.Fields["connections"] = ProjectConnections.All().Select(c =>
             {
                 Dictionary<string, object> summary = c.ToSummary();
-                summary["usedByProject"] = used.Contains(c.Key, StringComparer.OrdinalIgnoreCase);
                 summary["default"] = string.Equals(c.Key, defaultConnection, StringComparison.OrdinalIgnoreCase);
                 return summary;
             }).ToList();
@@ -134,7 +133,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private static void WhoAmI(ConnectionCommandRequest request, ConnectionCommandResult result)
         {
-            ConnectionRecord record = ResolveTarget(request, out string error);
+            ConnectionRecord record = ResolveTarget(request, out string error, worksOnAnyConnection: true);
             if (record == null)
             {
                 result.Status = "connection-unknown";
@@ -153,7 +152,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private static async Task LogoutAsync(ConnectionCommandRequest request, ConnectionCommandResult result)
         {
-            ConnectionRecord record = ResolveTarget(request, out string error);
+            ConnectionRecord record = ResolveTarget(request, out string error, worksOnAnyConnection: true);
             if (record == null)
             {
                 result.Status = "connection-unknown";
@@ -200,7 +199,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             if (string.IsNullOrWhiteSpace(request.Connection) && !string.IsNullOrWhiteSpace(request.App))
             {
                 // A credential of the project's own configuration file, not in the store yet (or not named by key); since the
-                // import goes into the store and leaves no file in an environment project, a connection the project uses with
+                // import goes into the store and leaves no file in an environment project, a connection of the computer with
                 // that app and environment.
                 if (ConnectionLoginService.TryFindProjectCredential(request.App, request.Env, out AppIdentification identification,
                                                                     out string app, out string env, out string error))
@@ -209,15 +208,15 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 }
                 else
                 {
-                    ConnectionRecord used = FindUsedByApp(request.App, request.Env, out string usedError);
-                    if (used == null)
+                    ConnectionRecord stored = FindByApp(request.App, request.Env, out string storedError);
+                    if (stored == null)
                     {
                         result.Status = "connection-unknown";
-                        result.Error = usedError ?? error;
+                        result.Error = storedError ?? error;
                         return;
                     }
 
-                    outcome = await ConnectionLoginService.LoginAsync(used.Key, options);
+                    outcome = await ConnectionLoginService.LoginAsync(stored.Key, options);
                 }
             }
             else
@@ -258,33 +257,37 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             {
                 "login-timeout" => "login-timeout",
                 "login-required" => "login-required",
+                "platform-mismatch" => "platform-mismatch",
                 _ => "login-failed",
             };
         }
 
         /// <summary>
-        /// The connection the project uses whose app (the configuration file's name) and environment key are these. Null, with
+        /// The connection of the computer whose app (the configuration file's name) and environment key are these. Null, with
         /// <paramref name="error"/> set only when the name fits several, when there is not exactly one.
         /// </summary>
-        private static ConnectionRecord FindUsedByApp(string app, string env, out string error)
+        private static ConnectionRecord FindByApp(string app, string env, out string error)
         {
             error = null;
-            List<ConnectionRecord> matches = ProjectConnections.Used
-                .Select(ConnectionStore.Get)
-                .Where(r => r != null
-                            && string.Equals(r.App, app, StringComparison.OrdinalIgnoreCase)
+            List<ConnectionRecord> matches = ProjectConnections.All()
+                .Where(r => string.Equals(r.App, app, StringComparison.OrdinalIgnoreCase)
                             && (string.IsNullOrEmpty(env) || string.Equals(r.Env, env, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
             if (matches.Count > 1)
-                error = $"The app '{app}' names {matches.Count} connections of this project: add the environment, or name one of their keys: " +
+                error = $"The app '{app}' names {matches.Count} connections on this computer: add the environment, or name one of their keys: " +
                         string.Join(", ", matches.Select(r => r.Key)) + ".";
 
             return matches.Count == 1 ? matches[0] : null;
         }
 
-        /// <summary>The connection a request names, or the project's only connection when it names none.</summary>
-        private static ConnectionRecord ResolveTarget(ConnectionCommandRequest request, out string error)
+        /// <summary>
+        /// The connection a request names, or the only usable connection of the computer when it names none.
+        /// <paramref name="worksOnAnyConnection"/> is for the commands that also act on a connection whose app key is not a
+        /// CreatorKit app (<c>whoami</c>, <c>logout</c>): when every connection is one, they are told to name it, not to import
+        /// a CreatorKit file.
+        /// </summary>
+        private static ConnectionRecord ResolveTarget(ConnectionCommandRequest request, out string error, bool worksOnAnyConnection = false)
         {
             error = null;
 
@@ -293,9 +296,17 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             ConnectionRecord only = ConnectionStore.Get(ProjectConnections.DefaultKey);
             if (only == null)
-                error = ProjectConnections.UsedInStoreCount == 0
-                    ? "The project uses no connection: import a tenant's configuration file (tenant-config), or name a connection of the store with the connection argument."
-                    : $"The project uses {ProjectConnections.UsedInStoreCount} connections: name one with the connection argument (see the connections command).";
+            {
+                int usable = ProjectConnections.UsableCount;
+                int all = ProjectConnections.All().Count;
+                error = usable > 1
+                    ? $"There are {usable} connections on this computer: name one with the connection argument (see the connections command)."
+                    : all == 0
+                        ? "There is no connection on this computer: import a tenant's configuration file (tenant-config), or name a connection with the connection argument."
+                        : worksOnAnyConnection
+                            ? "None of the connections on this computer is a CreatorKit app: name the one you mean with the connection argument (see the connections command)."
+                            : "None of the connections on this computer is a CreatorKit app: import the CreatorKit configuration file of the tenant (tenant-config).";
+            }
 
             return only;
         }

@@ -46,6 +46,18 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// <summary>The app name of the imported file (its name up to the first dot).</summary>
         public string App { get; set; }
 
+        /// <summary>
+        /// The platform of the app key (<c>app.platform</c> of <c>config-public</c>) at the last import, login or refresh. Null
+        /// when it is not known: a record from before the field, or a server that does not send it.
+        /// </summary>
+        public string Platform { get; set; }
+
+        /// <summary>
+        /// True when the platform is known and is not a CreatorKit app: an environment project does not use such a
+        /// connection (it stays listed, cannot be ticked and can be removed from the computer).
+        /// </summary>
+        [JsonIgnore] public bool PlatformMismatch => Platform != null && !AppPlatforms.Matches(Platform, AppPlatforms.CreatorKit);
+
         /// <summary>The environment key inside the imported file.</summary>
         public string Env { get; set; }
 
@@ -153,6 +165,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             { "tenantLabel", TenantLabel },
             { "environment", Environment },
             { "platformVersion", PlatformVersion },
+            { "platform", Platform },
             { "app", App },
             { "env", Env },
             { "loggedIn", HasSession },
