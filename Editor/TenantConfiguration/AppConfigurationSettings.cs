@@ -27,10 +27,19 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         [SerializeField, Tooltip("The application's build script, read by the application's own build. The SDK does not use it.")]
         private ScriptableObject buildScript;
 
+        // The platform the app keys of this asset must have (cap_platform): WebGL, Mobile or VR in the Virtuademy application.
+        // Read only where the project defines VIRTUADEMY_APPLICATION; an external app takes ExternalApp whatever this holds.
+        [SerializeField, Tooltip("The platform (cap_platform) the app keys selected here must have: WebGL, Mobile or VR in the Virtuademy application. " +
+                                 "Change config refuses a key of another platform. An external app does not use this field.")]
+        private string appPlatform;
+
         [SerializeField] private Tenant cachedTenant;
         [SerializeField] private string cachedAppConfigJson;
 
         public bool IsSelected { get => isSelected; set => isSelected = value; }
+
+        /// <summary>The <c>cap_platform</c> the app keys of this asset must have (<see cref="AppPlatforms"/>); empty when none is set.</summary>
+        public string AppPlatform => appPlatform;
 
         public List<TextAsset> AppAssets => appAssets;
 

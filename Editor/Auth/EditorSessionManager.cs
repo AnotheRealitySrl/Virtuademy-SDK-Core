@@ -21,7 +21,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
     /// Owns the editor's authenticated sessions: renews them before they expire, and replays a request once
     /// when the server rejects a token we believed was still good. A session belongs to a connection of the
     /// per-user <see cref="ConnectionStore"/>; every method has a form that names the connection, and the one
-    /// that does not uses the project's default connection (<see cref="ProjectConnections.DefaultKey"/>).
+    /// that does not uses the default connection (<see cref="ProjectConnections.DefaultKey"/>).
     ///
     /// Every editor tool that calls a Virtuademy API must go through
     /// <see cref="SendAuthorizedAsync(Func{HttpRequestMessage}, HttpClient, bool)"/> (or at least await
@@ -52,7 +52,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         public static bool InteractiveLoginAllowed => !runsInBatchMode;
 
         /// <summary>
-        /// Guarantees a usable token for the project's default connection, renewing it if needed.
+        /// Guarantees a usable token for the default connection, renewing it if needed.
         /// </summary>
         public static Task<bool> EnsureValidTokenAsync(bool allowInteractive = true) =>
             EnsureValidTokenAsync(ProjectConnections.DefaultKey, allowInteractive);
@@ -95,7 +95,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Sends an authenticated request on the project's default connection.
+        /// Sends an authenticated request on the default connection.
         /// </summary>
         public static Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory,
                                                                     HttpClient client = null,
@@ -142,7 +142,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         }
 
         /// <summary>
-        /// Ends the project's default connection's session on both sides: the stored token and the MSAL refresh
+        /// Ends the default connection's session on both sides: the stored token and the MSAL refresh
         /// token (which stays when another connection uses the same account).
         /// </summary>
         public static async Task LogoutAsync() => await LogoutAsync(ProjectConnections.DefaultKey);

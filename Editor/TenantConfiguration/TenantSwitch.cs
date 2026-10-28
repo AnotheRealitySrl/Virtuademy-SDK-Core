@@ -82,11 +82,19 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
         /// the platform's own configurator reads a product name and a UI theme out of it — so this
         /// only makes it available. A failure to fetch it is not fatal, because a project that does
         /// not read it should still get a tenant.
+        /// <para>
+        /// The app's platform is checked first (<see cref="CheckPlatformAsync"/>), before anything is read or recorded.
+        /// </para>
         /// </remarks>
         /// <returns>The tenant, or null when it could not be read — in which case nothing is written.</returns>
+        /// <exception cref="AppPlatformMismatchException">The selected app is made for another platform than this project
+        /// takes. Not a null return: the configurator of the application does not stop on null, and would write the
+        /// credentials anyway.</exception>
         public static async Task<Tenant> ReadTenant(AppConfigurationSettings settings)
         {
             AppIdentification appConfig = settings.SelectedConfig;
+
+            await CheckPlatformAsync(settings);
 
             ApiResponse<Tenant> tenantData = await TenantConfigurationClient.GetTenantData(appConfig);
 
@@ -112,6 +120,47 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             EditorUtility.SetDirty(settings);
 
             return tenantData.Content;
+        }
+
+        /// <summary>
+        /// Refuses an app made for another platform than this project takes (meta-repo ADR 0037, "The app key's platform"):
+        /// the Virtuademy application takes the platform of the build it configures (<see cref="AppConfigurationSettings.AppPlatform"/>),
+        /// an external app <see cref="AppPlatforms.ExternalApp"/>, an environment project <see cref="AppPlatforms.CreatorKit"/>.
+        /// An application whose settings name no platform, a Configuration-API that does not send the field and a call that
+        /// fails are warned about and accepted: the check could not run, which is not a mismatch.
+        /// </summary>
+        private static async Task CheckPlatformAsync(AppConfigurationSettings settings)
+        {
+#if VIRTUADEMY_APPLICATION
+            string expected = settings.AppPlatform;
+            if (string.IsNullOrWhiteSpace(expected))
+            {
+                Debug.LogWarning($"[TenantSwitch] {settings.name} names no app platform, so the check that the selected app is made for this build could not run.");
+                return;
+            }
+#elif VIRTUADEMY_SDK_ENVIRONMENTS
+            string expected = AppPlatforms.CreatorKit;
+#else
+            string expected = AppPlatforms.ExternalApp;
+#endif
+
+            ApiResponse<TenantPublicConfig> publicConfig = await TenantConfigurationClient.GetTenantPublicConfig(settings.SelectedConfig);
+            if (!publicConfig.IsSuccess)
+            {
+                Debug.LogWarning($"[TenantSwitch] The app's platform could not be read ({publicConfig.ReasonPhrase}), so the check that it is made for this project could not run.");
+                return;
+            }
+
+            string found = publicConfig.Content?.App?.Platform;
+            if (found == null)
+            {
+                Debug.LogWarning("[TenantSwitch] The platform did not say which kind of app the selected one is (a Configuration-API older than 2026.7.0), " +
+                                 "so the check that it is made for this project could not run.");
+                return;
+            }
+
+            if (!AppPlatforms.Matches(found, expected))
+                throw new AppPlatformMismatchException(expected, found);
         }
     }
 }

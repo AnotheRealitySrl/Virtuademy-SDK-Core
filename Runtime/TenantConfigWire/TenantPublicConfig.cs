@@ -25,6 +25,7 @@ namespace Virtuademy.SDK.TenantConfiguration
         [SerializeField] private int? tenantKey;
         [SerializeField] private string environment;
         [SerializeField] private string backofficeUrl;
+        [SerializeField] private TenantPublicAppConfig app;
 
         /// <summary>
         /// Languages this tenant supports, in order of preference. First
@@ -61,5 +62,36 @@ namespace Virtuademy.SDK.TenantConfiguration
         /// Configuration-API predates the field (2026.7.0): the editor then shows no Back Office button.
         /// </summary>
         public string BackofficeUrl => string.IsNullOrWhiteSpace(backofficeUrl) ? null : backofficeUrl.Trim();
+
+        /// <summary>
+        /// The calling app: what it is (<see cref="TenantPublicAppConfig.Platform"/>) and the origins it accepts and offers.
+        /// Null when the app has neither a platform nor a custom configuration, or when the Configuration-API predates the
+        /// object. The call is signed by the app itself, so this says nothing about any other app.
+        /// </summary>
+        public TenantPublicAppConfig App => app;
+    }
+
+    /// <summary>
+    /// The <c>app</c> object of <c>config-public</c>: the calling app's own block. Every field is optional.
+    /// </summary>
+    [Serializable, Newtonsoft.Json.JsonObject(Newtonsoft.Json.MemberSerialization.Fields)]
+    public class TenantPublicAppConfig
+    {
+        [SerializeField] private string platform;
+        [SerializeField] private List<string> acceptedOrigins;
+        [SerializeField] private List<string> offeredOrigins;
+
+        /// <summary>
+        /// The app's platform tag (<c>cap_platform</c>), as stored: which kind of client the credential was made for
+        /// (<c>CreatorKit</c>, <c>WebGL</c>, <c>Mobile</c>, <c>VR</c>, <c>BO</c>...). A free string. Null when the column is
+        /// blank, or when the Configuration-API predates the field (2026.7.0).
+        /// </summary>
+        public string Platform => string.IsNullOrWhiteSpace(platform) ? null : platform.Trim();
+
+        /// <summary>The origins (<c>idp</c> values) the app accepts on return from the identity provider. Null when not set.</summary>
+        public List<string> AcceptedOrigins => acceptedOrigins;
+
+        /// <summary>The origins the app draws as sign-in buttons. Null (offer whatever is accepted) differs from empty (offer none).</summary>
+        public List<string> OfferedOrigins => offeredOrigins;
     }
 }

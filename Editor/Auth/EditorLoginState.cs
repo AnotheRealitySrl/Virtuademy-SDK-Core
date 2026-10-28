@@ -5,14 +5,14 @@ using System;
 namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
-    /// What the editor knows about the login of the project's default connection
+    /// What the editor knows about the login of the default connection
     /// (<see cref="ProjectConnections.DefaultKey"/>), read from the per-user <see cref="ConnectionStore"/>.
     /// Nothing is kept in SessionState or EditorPrefs any more, and the token is never held here: every
     /// read goes to the store, so a renewal or a logout done by another process shows at once.
     /// </summary>
     /// <remarks>
     /// This is the view the editor tools of the single-login SDK were written against, kept so they
-    /// keep working with the project's default connection. It does not say where a deploy goes: a deploy names its
+    /// keep working with the default connection. It does not say where a deploy goes: a deploy names its
     /// connections. New code names its connection and reads <see cref="ConnectionStore.Get"/>. Who writes the session
     /// is <see cref="ConnectionLoginService"/> and <see cref="EditorSessionManager"/>, nothing else.
     /// </remarks>
@@ -112,7 +112,7 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
                 && active.Env == env;
         }
 
-        /// <summary>The user logged in or out of a connection, or the project's default connection changed.</summary>
+        /// <summary>The user logged in or out of a connection, or the default connection changed.</summary>
         public static event Action OnLoginStateChanged;
 
         /// <summary>

@@ -11,20 +11,23 @@ using UnityEngine;
 namespace Virtuademy.SDK.TenantConfiguration.Editor
 {
     /// <summary>
-    /// Which connections of the user's store this project uses (ADR 0037), kept per user in
-    /// <c>UserSettings/Virtuademy/connections.json</c>: Unity's folder for per-user, unversioned project
-    /// settings. The file names connections by key and holds no token and no secret.
+    /// The connections an environment project works with, and the deploy targets it keeps (ADR 0037). The connections are
+    /// every one in the user's store (<see cref="All"/>): the project keeps no list of its own. The targets are kept per
+    /// user in <c>UserSettings/Virtuademy/connections.json</c>, Unity's folder for per-user, unversioned project settings.
+    /// The file names connections by key and holds no token and no secret.
     /// </summary>
     /// <remarks>
     /// There is no "current login" any more, only the connection an operation names. An editor request or a command
-    /// that names no connection uses the project's only connection, <see cref="DefaultKey"/>; with two or more there is
-    /// none, and such a request is refused: it must name its connection. Nobody chooses a default connection (that choice
-    /// was dropped on 2026-10-27, before 2026.7.0 was released). It decides neither where a deploy goes, which names its
-    /// own connections, nor play mode (the tenant switch writes <c>PlatformCredentials.asset</c> from the selected file).
+    /// that names no connection uses the only usable connection of the computer, <see cref="DefaultKey"/>; with none, or
+    /// two or more, there is none, and such a request is refused: it must name its connection. Nobody chooses a default
+    /// connection (that choice was dropped on 2026-10-27, before 2026.7.0 was released). It decides neither where a deploy
+    /// goes, which names its own connections, nor play mode (the tenant switch writes <c>PlatformCredentials.asset</c> from
+    /// the selected file).
     /// <para>
-    /// The file also keeps the project's deploy targets (<see cref="TargetsOf"/>): per connection, the worlds and the
-    /// tenant level ticked in the Publish Environments window. They replace the world ticks that lived in one
-    /// machine-wide EditorPrefs value and were ticked again in any tenant and project.
+    /// The file keeps the project's deploy targets (<see cref="TargetsOf"/>): per connection, the worlds and the tenant
+    /// level ticked in the Publish Environments window. They replace the world ticks that lived in one machine-wide
+    /// EditorPrefs value and were ticked again in any tenant and project. A target whose connection is no longer in the
+    /// store is dropped the next time the file is read, when the store itself was read from its file.
     /// </para>
     /// </remarks>
     public static class ProjectConnections
@@ -47,11 +50,11 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private sealed class Selection
         {
-            public List<string> Used { get; set; } = new();
             public List<DeployTarget> Targets { get; set; } = new();
 
             // The files written while a default connection could be chosen carry "Default" (earlier "Active", then
-            // "PlayMode"): nothing reads them, and the next write drops them.
+            // "PlayMode"), and those written while a project kept a list of its connections carry "Used": nothing reads
+            // them, and the next write drops them.
         }
 
         private static readonly object gate = new();
@@ -78,80 +81,38 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
         private static string FilePath => Path.Combine(Folder, "connections.json");
 
-        /// <summary>The connections this project uses, in the order they were first used.</summary>
-        public static IReadOnlyList<string> Used
-        {
-            get
-            {
-                lock (gate)
-                    return Read().Used.ToList();
-            }
-        }
+        /// <summary>
+        /// Every connection in the store, which every environment project uses. Sorted by tenant label, then environment,
+        /// then key (ordinal, case-insensitive), so that the order does not change when a record is rewritten.
+        /// </summary>
+        public static IReadOnlyList<ConnectionRecord> All() =>
+            ConnectionStore.All()
+                .OrderBy(c => c.TenantLabel ?? "", StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.Environment ?? "", StringComparer.OrdinalIgnoreCase)
+                .ThenBy(c => c.Key ?? "", StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
         /// <summary>
-        /// The connection an editor request or a command that names no connection uses: the project's only connection in
-        /// the store. Null when the project uses none, or two or more: a request must then name its connection.
+        /// <see cref="All"/> without the connections whose app key is not a CreatorKit app
+        /// (<see cref="ConnectionRecord.PlatformMismatch"/>): they stay listed, but nothing deploys through them.
+        /// </summary>
+        public static IReadOnlyList<ConnectionRecord> Usable() => All().Where(c => !c.PlatformMismatch).ToList();
+
+        /// <summary>
+        /// The connection an editor request or a command that names no connection uses: the only usable connection in the
+        /// store. Null when there is none, or two or more: a request must then name its connection.
         /// </summary>
         public static string DefaultKey
         {
             get
             {
-                lock (gate)
-                {
-                    List<string> existing = Read().Used.Where(k => ConnectionStore.Get(k) != null).ToList();
-                    return existing.Count == 1 ? ConnectionStore.Get(existing[0])?.Key : null;
-                }
+                IReadOnlyList<ConnectionRecord> usable = Usable();
+                return usable.Count == 1 ? usable[0].Key : null;
             }
         }
 
-        /// <summary>The connections this project uses that are in the store.</summary>
-        public static int UsedInStoreCount
-        {
-            get
-            {
-                lock (gate)
-                    return Read().Used.Count(k => ConnectionStore.Get(k) != null);
-            }
-        }
-
-        /// <summary>Records that the project uses <paramref name="key"/>.</summary>
-        public static void Use(string key)
-        {
-            if (string.IsNullOrEmpty(key) || ConnectionStore.IsWorkerProcess)
-                return;
-
-            lock (gate)
-            {
-                Selection selection = Read();
-                if (selection.Used.Contains(key, StringComparer.OrdinalIgnoreCase))
-                    return;
-
-                selection.Used.Add(key);
-                Write(selection);
-            }
-        }
-
-        /// <summary>
-        /// The project stops using <paramref name="key"/> ("Remove from project" in the Publish Environments window): it leaves
-        /// the list and its deploy targets go. The connection stays in the store, logged in or not, for the other projects.
-        /// Every view of the project's connections is told.
-        /// </summary>
-        public static void Remove(string key)
-        {
-            if (string.IsNullOrEmpty(key) || ConnectionStore.IsWorkerProcess)
-                return;
-
-            lock (gate)
-            {
-                Selection selection = Read();
-                selection.Used.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
-                selection.Targets.RemoveAll(t => string.Equals(t.Connection, key, StringComparison.OrdinalIgnoreCase));
-
-                Write(selection);
-            }
-
-            EditorLoginState.NotifyLoginChanged();
-        }
+        /// <summary>How many connections of the store are usable (<see cref="Usable"/>).</summary>
+        public static int UsableCount => Usable().Count;
 
         /// <summary>The deploy targets the project keeps for one connection: its ticked worlds and, when ticked, its tenant level.</summary>
         public static IReadOnlyList<DeployTarget> TargetsOf(string connectionKey)
@@ -189,6 +150,12 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
             }
         }
 
+        /// <summary>
+        /// Drops this project's deploy targets of one connection, which was removed from the computer
+        /// (<see cref="ConnectionLoginService.RemoveFromComputerAsync"/>).
+        /// </summary>
+        internal static void DropTargets(string connectionKey) => SetTargets(connectionKey, null, false);
+
         private static Selection Read()
         {
             string path = FilePath;
@@ -197,22 +164,53 @@ namespace Virtuademy.SDK.TenantConfiguration.Editor
 
             long stamp = File.GetLastWriteTimeUtc(path).Ticks;
             if (cache != null && stamp == cacheStamp)
-                return cache;
+            {
+                Selection current = cache;
+                DropOrphanTargets(current);
+                return current;
+            }
 
             try
             {
                 cache = JsonConvert.DeserializeObject<Selection>(File.ReadAllText(path, Encoding.UTF8)) ?? new Selection();
-                cache.Used ??= new List<string>();
                 cache.Targets ??= new List<DeployTarget>();
             }
             catch (Exception ex) when (ex is IOException || ex is JsonException)
             {
-                Debug.LogWarning($"[ProjectConnections] {path} cannot be read ({ex.GetType().Name}); the project's connections are chosen again.");
+                Debug.LogWarning($"[ProjectConnections] {path} cannot be read ({ex.GetType().Name}); the project's deploy targets are chosen again.");
                 cache = new Selection();
             }
 
             cacheStamp = stamp;
-            return cache;
+            Selection read = cache;
+            DropOrphanTargets(read);
+            return read;
+        }
+
+        /// <summary>
+        /// Drops the targets of a connection that is no longer in the store (it was removed from the computer, possibly from
+        /// another project). Only when the store was actually read from its file (<see cref="ConnectionStore.WasRead"/>): an
+        /// asset-import worker, a memory-only store (empty after every restart), a missing file and a file that cannot be read
+        /// at the moment say nothing about which connections exist, and must not wipe the targets.
+        /// </summary>
+        private static void DropOrphanTargets(Selection selection)
+        {
+            if (selection.Targets.Count == 0 || ConnectionStore.IsWorkerProcess || !ConnectionStore.WasRead)
+                return;
+
+            HashSet<string> keys = new(ConnectionStore.All().Select(c => c.Key), StringComparer.OrdinalIgnoreCase);
+            if (selection.Targets.RemoveAll(t => !keys.Contains(t.Connection ?? "")) == 0)
+                return;
+
+            try
+            {
+                Write(selection);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+            {
+                // The cached copy is already right; the file is cleaned by the next write.
+                Debug.LogWarning($"[ProjectConnections] The targets of connections that are gone could not be removed from {FilePath}: {ex.Message}");
+            }
         }
 
         private static void Write(Selection selection)

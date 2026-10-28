@@ -123,9 +123,10 @@ configurator calls into it rather than repeating the flow.
 credential goes depends on the kind of project:
 
 - an **environment project** (the Publish Environments window, `EnvironmentsCli tenant-config`):
-  `ImportIntoStoreAsync` puts it into the connection store only, one connection per environment of the file, each one the
-  project uses. No file is written to the project. It needs the network,
-  because a connection is named by the tenant key the platform gives.
+  `ImportIntoStoreAsync` puts it into the connection store only, one connection per environment of the file, which every
+  environment project of the computer then uses. No file is written to the project. It needs the network,
+  because a connection is named by the tenant key the platform gives, and a file whose app is not a CreatorKit app is refused
+  (`platform-mismatch`).
 - an **application** (Available Tenants' **Import configuration file...**): `ImportIntoProject` calls
   `AppConfigurationImporter.Import`, and the file goes into the project (`Assets/Editor/TenantConfiguration`, next to the
   settings asset), into the App Assets of the settings asset, and is selected: the tenant switch writes
@@ -177,21 +178,23 @@ and the user three minutes **from the moment the URL is issued** (`LoginTimeoutE
 Logout drops the connection's token and removes its MSAL account only when no other connection uses the same authority and
 account.
 
-A project says which connections it uses in `UserSettings/Virtuademy/connections.json` (`ProjectConnections`: no token
-and no secret, keys only). Nobody chooses a default connection: an editor request or a command that names no connection
-uses the project's only one (`ProjectConnections.DefaultKey`), and with two or more it has to name its connection.
-**Remove from project...**, in Virtuademy > Publish Environments, drops a connection from the list (`ProjectConnections.Remove`).
+Every environment project uses every connection in the store (`ProjectConnections.All()`): there is no list to keep, and
+a connection imported or logged in from one project is in all of them. Nobody chooses a default connection: an editor request
+or a command that names no connection uses the only usable connection of the computer (`ProjectConnections.DefaultKey`), and
+with none, or two or more, it has to name its connection. A connection whose app key is not a CreatorKit app
+(`ConnectionRecord.PlatformMismatch`) stays listed but is not usable. **Remove from this computer...**, in Virtuademy >
+Publish Environments, logs a connection out and deletes it from the store for every project
+(`ConnectionLoginService.RemoveFromComputerAsync`); using the tenant again takes its configuration file and a login.
 That implicit connection does not decide play mode: the tenant switch writes `PlatformCredentials.asset` from the selected file. `EditorLoginState` is the view of it. It does not decide where a deploy goes: the Publish Environments window and the
 command line name their connections. `EditorApiEndpoint` takes the Application API address from the tenant a connection
 reported at login, never from the project's `PlatformEndpoints` asset. `EditorSessionManager` renews and sends on any
-connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it means the project's only one.
+connection by key (`SendAuthorizedAsync(connectionKey, ...)`); without a key it means the only usable connection of the computer.
 **An operation takes its connection once, at the start, and passes the key down** (the deploy, the published-environments
-index, the script verification all do): the project's connections can change while it runs, and the token of a connection is
-sent only to the hosts of its own tenant (anything else is refused before it is sent). Logins from the command line and
-request files, like an import, add their connection to the project. The same file keeps the project's
-deploy targets: per connection, the worlds and the tenant level ticked in the Publish Environments window
-(`ProjectConnections.TargetsOf`, `SetTargets`). Every connection a configuration file of the project stands for counts as
-one the project uses, logged in or not. In
+index, the script verification all do): the connections can change while it runs, and the token of a connection is
+sent only to the hosts of its own tenant (anything else is refused before it is sent). The project keeps its
+deploy targets in `UserSettings/Virtuademy/connections.json`: per connection, the worlds and the tenant level ticked in the
+Publish Environments window (`ProjectConnections.TargetsOf`, `SetTargets`); the targets of a connection that was removed
+from the computer are dropped when the file is next read. In
 batch mode a session is renewed silently or not at all (`EditorSessionManager.InteractiveLoginAllowed` is false): the `login`
 command is how a browser is asked for.
 
@@ -244,7 +247,7 @@ window is unfocused):
   (`FileShare.None`) is not tested on Mono for macOS either. Tested on Windows, Unity 6000.3.21f1, with a real B2C login
   against two Configuration-API instances.
 - **Play mode is not tied to a connection.** The tenant switch writes `PlatformCredentials.asset` from the window's
-  selected file, not from a connection's record (the default connection is the same tenant once the file is a
+  selected file, not from a connection's record (the default connection, the only usable one of the computer, is the same tenant once the file is a
   connection); how play mode picks its tenant is to be decided on its own (meta-repo ADR 0037), and the check that git ignores `UserSettings/` and `PlatformCredentials.asset` is not made.
 
 - **`TenantConfigurationClient`'s doc comment reads backwards.** It says the base class "was the
