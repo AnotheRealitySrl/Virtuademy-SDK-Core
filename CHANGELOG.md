@@ -88,6 +88,11 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
   Environments window), with its deploy targets; the connection stays in the store. `ProjectConnections.UsedInStoreCount`.
 - `TenantSelectionWindow.ActionsCreated` and `TenantSelectionWindow.Settings`: an application adds its own buttons beside
   "Change config" (the Virtuademy application adds its Build button there) and reads the settings asset when one is clicked.
+- **`VirtuademyWindowHeader`** (`Editor/Common/`): the Virtuademy header of the SDK's editor windows, the logo (light or
+  dark lettering by editor skin) with the window's name under it, its stylesheet `VirtuademyWindowHeader.uss` and the two
+  logo images, moved here from `Virtuademy-SDK-Environments` with their GUIDs. Available Tenants shows it, and so does
+  Publish Environments. The setup package keeps an identical copy of the images and the rules, because it installs the SDK
+  and cannot reference it.
 
 ### Changed
 - **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only
