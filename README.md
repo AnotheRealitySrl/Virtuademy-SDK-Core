@@ -206,6 +206,12 @@ session (`ImportProjectCredentialsAsync`, which asks the platform once per crede
 The files are left in the project: an environment project no longer needs them.
 Each connection then needs one login.
 
+`SetupBridge` (`Editor/Auth/`) is the entry point of the SDK's setup package (`Virtuademy-SDK-Environments-Setup`), which
+installs the SDK and cannot reference it, so it calls the class by name, through reflection. Its members are a contract,
+versioned by `SetupBridge.Version`, and their names do not change: `Connections()` (a JSON array) and `ImportConfigurationFileAsync`,
+`LoginAsync`, `LogoutAsync`, `RemoveFromComputerAsync` and `RefreshAsync` (each a `Task<string>` with one JSON object, never a token
+or a secret). They wrap `ConfigurationFileImport` and `ConnectionLoginService`, and run on the editor's main thread.
+
 **From the command line and a script.** `EnvironmentsCli` (in `Virtuademy-SDK-Environments`) has `login`, `logout`,
 `connections` and `whoami`, which write a JSON result to the file `-vdResultFile` names. They run in batch mode only while
 the project is closed, because Unity refuses a second instance of a project (`Temp/UnityLockfile` tells the two cases apart).
