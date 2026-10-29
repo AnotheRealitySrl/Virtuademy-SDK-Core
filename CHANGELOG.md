@@ -115,6 +115,13 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
   logo images, moved here from `Virtuademy-SDK-Environments` with their GUIDs. Available Tenants shows it, and so does
   Publish Environments. The setup package keeps an identical copy of the images and the rules, because it installs the SDK
   and cannot reference it.
+- **`SetupBridge`** (`Editor/Auth/`): the stable entry point the setup package (`Virtuademy-SDK-Environments-Setup`) calls by
+  reflection, because it installs the SDK and cannot reference it. `Version` (1) is raised on any change of the contract;
+  `Connections()` returns the computer's connections as JSON (the shape of `ConnectionRecord.ToSummary()`), and
+  `ImportConfigurationFileAsync`, `LoginAsync`, `LogoutAsync`, `RemoveFromComputerAsync` and `RefreshAsync` wrap
+  `ConfigurationFileImport` and `ConnectionLoginService` and return one JSON object each (`ok`, `code`, `message`,
+  `connection`; the import adds `app`, `connections`, `failures` and `platformMismatches`). No result holds a token or a
+  secret, none throws, and an asset-import worker process gets `code: "worker"`.
 
 ### Changed
 - **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only
