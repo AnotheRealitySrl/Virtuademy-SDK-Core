@@ -122,6 +122,9 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
   `ConfigurationFileImport` and `ConnectionLoginService` and return one JSON object each (`ok`, `code`, `message`,
   `connection`; the import adds `app`, `connections`, `failures` and `platformMismatches`). No result holds a token or a
   secret, none throws, and an asset-import worker process gets `code: "worker"`.
+- **`ISessionApi.ReloadSession(Action<bool>)`** plays the current experience again, in the current session's mode: a
+  multiplayer session is joined again, in the same shard, with the same people and the state they share; a single-player
+  one starts over from the experience's initial state. The Reload Scene node of `Virtuademy-SDK-Environments` uses it.
 
 ### Changed
 - **The editor session is read from the store, not from EditorPrefs** (behaviour change). `EditorLoginState` is now a read-only
@@ -168,6 +171,10 @@ the type of `AppConfigurationSettings.BuildScript`; at 0.x a minor bump carries 
 - `JwtToken.Expiry` reads a value without an offset as UTC; it converted it as local time, while
   `IsExpired` compared it as UTC. `IsExpired` now compares against `Expiry`, so a value that
   carries an offset is converted before the comparison.
+
+### Deprecated
+- **`ISessionApi.IsEnvironmentMultiplayer`**: use `IsMultiplayer`, the mode of the current session. A script that reads it
+  still compiles, with a warning, and behaves as before.
 
 ### Fixed
 - `ApiResponse<T>`, `ApiResponseArray<T>` and `ApiResponseSearch<T>` threw from the constructor

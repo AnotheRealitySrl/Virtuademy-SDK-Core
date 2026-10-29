@@ -44,7 +44,11 @@ namespace Virtuademy.ScriptingApi
         /// <summary>The addressable name of the environment being played.</summary>
         string EnvironmentName { get; }
 
-        /// <summary>Whether the environment was authored as multiplayer.</summary>
+        /// <summary>Obsolete: use <see cref="IsMultiplayer"/>, the mode of the current session.</summary>
+        // Kept, answering false as it always did, for the scripts already published against it: they
+        // would fail on the call if it were removed. The platform records no multiplayer flag on an
+        // environment; the Reload Scene node, which read it, calls ReloadSession now.
+        [Obsolete("Use IsMultiplayer, the mode of the current session.")]
         bool IsEnvironmentMultiplayer { get; }
 
         /// <summary>
@@ -105,7 +109,7 @@ namespace Virtuademy.ScriptingApi
         /// platform has no experience for that name, which is how a world checks whether a scene it
         /// wants to send the player to exists at all.
         /// </summary>
-        /// <remarks>Nodes: <c>Change Scene</c>, <c>Check Scene Availability</c>, <c>Reload Scene</c>.</remarks>
+        /// <remarks>Nodes: <c>Change Scene</c>, <c>Check Scene Availability</c>.</remarks>
         IEnumerator FindExperience(string addressableName, Action<ExperienceView> onFound);
 
         /// <summary>
@@ -113,8 +117,19 @@ namespace Virtuademy.ScriptingApi
         /// whether the platform accepted; on success the current world is already being torn down
         /// by the time it runs, so there is rarely anything useful left to do in it.
         /// </summary>
-        /// <remarks>Nodes: <c>Change Scene</c>, <c>Reload Scene</c>.</remarks>
+        /// <remarks>Node: <c>Change Scene</c>.</remarks>
         IEnumerator JoinExperience(ExperienceView experience, bool multiplayer, Action<bool> onJoined = null);
+
+        /// <summary>
+        /// Plays the current experience again, in the current session's mode: a multiplayer session
+        /// is joined again, in the same shard, with the same people and the state they share; a
+        /// single-player one starts over from the experience's initial state.
+        /// <paramref name="onReloaded"/> receives whether the platform accepted; as with
+        /// <see cref="JoinExperience"/>, on success the world is already being torn down by the time
+        /// it runs.
+        /// </summary>
+        /// <remarks>Node: <c>Reload Scene</c>.</remarks>
+        IEnumerator ReloadSession(Action<bool> onReloaded = null);
 
         /// <summary>
         /// Someone else joined the session: their platform id and their session id.
