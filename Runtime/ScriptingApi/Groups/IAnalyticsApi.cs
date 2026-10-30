@@ -29,6 +29,13 @@ namespace Virtuademy.ScriptingApi
         void Send(EAnalyticVerb verb, AnalyticDTO analytic);
 
         /// <summary>
+        /// Sends <paramref name="analytic"/> and calls <paramref name="onSent"/> when the platform answered: success, or
+        /// failure with what went wrong. Unlike the overload without it, a failure does not throw: the caller learns it
+        /// and can send again (a queue with retries).
+        /// </summary>
+        void Send(EAnalyticVerb verb, AnalyticDTO analytic, AnalyticSentHandler onSent);
+
+        /// <summary>
         /// Mints the experience id every later statement in this run is grouped under, and calls
         /// <paramref name="onReady"/> once the platform has it.
         /// </summary>

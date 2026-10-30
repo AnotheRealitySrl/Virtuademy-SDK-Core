@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`IAnalyticsApi.Send(EAnalyticVerb, AnalyticDTO, AnalyticSentHandler)`** (2026.7, minor): sends and answers whether the
+  platform stored the statement (`AnalyticSentHandler(bool success, string error)`), without throwing, so a caller can
+  queue and retry. The overload without it is unchanged.
+- **Experience DTO constructors** (2026.7, minor): `ExperienceStartDTO(key, context)`, `ExperienceJoinDTO(key, context)`,
+  `ExperienceStepStartDTO(key, stepId, description)`, `ExperienceStepCompleteDTO(key, stepId, score, maxScore,
+  passingScore, outcome, scoringType)`, `ExperienceCompleteDTO(key, score, maxScore, passingScore, outcome,
+  scoringType)` with plain ints, and `ExperienceAnalyticDTO.SetKey`; each DTO keeps an explicit parameterless
+  constructor (nodes, serializers).
+
 Minor bump: additive API, plus behaviour changes an external app will notice (listed under
 Changed). The editor login API changes shape (ADR 0037, platform 2026.7.0): the members that went are named
 under Changed, and `Virtuademy.SDK.Core.Editor` is editor-only. **Breaking** for an app that used them: the
