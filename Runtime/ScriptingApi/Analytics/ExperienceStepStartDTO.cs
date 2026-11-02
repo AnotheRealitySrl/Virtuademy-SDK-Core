@@ -7,5 +7,16 @@ namespace Virtuademy.ScriptingApi
     {
         [SettableField(isRequired = true)]
         public string description;
+
+        public ExperienceStepStartDTO()
+        {
+        }
+
+        public ExperienceStepStartDTO(string key, string stepId, string description)
+        {
+            SetKey(key);
+            this.stepId = stepId;
+            this.description = description;
+        }
     }
 }
