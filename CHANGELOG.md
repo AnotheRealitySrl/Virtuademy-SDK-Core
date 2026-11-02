@@ -1,6 +1,14 @@
 # Release notes
 
-## Unreleased
+## v0.4.0
+
+Platform 2026.7. For creators: `IAnalyticsApi.Send` with an answer (whether the platform stored the statement) and
+constructors for the experience analytics DTOs, so a script builds and sends them itself. For the editor tools
+(ADR 0037): logins as named connections in one encrypted store per user, shared by the windows and the command
+line, the login without UI and the editor request pump, a token sent only to its own connection's hosts, the
+platform of an app key checked by the tenant switch, and `VirtuademyWindowHeader`. Breaking, at 0.x a minor bump:
+Configure App, `TenantConfigurationClient.UpdateAppCustomConfig` and `BuildScriptBase` are gone, and
+`AppConfigurationSettings.BuildScript` is a `ScriptableObject` (details below).
 
 - **`IAnalyticsApi.Send(EAnalyticVerb, AnalyticDTO, AnalyticSentHandler)`** (2026.7, minor): sends and answers whether the
   platform stored the statement (`AnalyticSentHandler(bool success, string error)`), without throwing, so a caller can

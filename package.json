@@ -1,7 +1,7 @@
 {
   "name": "com.anotherealitysrl.virtuademy-sdk-core",
   "displayName": "Virtuademy-SDK-Core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "unity": "2020.1",
   "description": "The creator-facing scripting surface and the platform transport: the interpreted-script API a world may name, the HTTP client base every API client derives from, and the Configuration API client with its wire types.",
   "keywords": [
