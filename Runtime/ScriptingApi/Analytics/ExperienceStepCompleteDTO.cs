@@ -15,7 +15,9 @@ namespace Virtuademy.ScriptingApi
         public EExperienceOutcome outcome;
         [SettableField]
         public EExperienceScoringType scoringType;
+        // The C# name stays `notes` (creator graphs set it by name); the server reads `note`
         [SettableField]
+        [Newtonsoft.Json.JsonProperty("note")]
         public string notes;
 
         public ExperienceStepCompleteDTO()
