@@ -1,3 +1,5 @@
+using System.Runtime.Serialization;
+
 namespace Virtuademy.ScriptingApi
 {
     public enum EExperienceScoringType
@@ -5,6 +7,8 @@ namespace Virtuademy.ScriptingApi
         None = 0,
         Numeric,
         Stars,
+        // On the wire (StringEnumConverter) the server's name: `Percent`
+        [EnumMember(Value = "Percent")]
         Percentage
     }
 }
